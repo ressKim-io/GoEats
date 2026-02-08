@@ -1,0 +1,27 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    implementation project(':common:common-dto')
+    implementation project(':common:common-exception')
+    implementation project(':common:common-outbox')
+    implementation project(':common:common-resilience')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // ★ OpenFeign for inter-service HTTP calls
+    implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
+
+    // ★ Kafka for event-driven communication
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // ★ Resilience4j full stack (CB + Retry + Bulkhead + RateLimiter + TimeLimiter)
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
+
+    // ★ Redis for idempotency cache
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    runtimeOnly 'com.h2database:h2'
+}
