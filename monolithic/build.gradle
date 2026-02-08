@@ -31,8 +31,8 @@ dependencies {
     // Caffeine Cache (local cache for monolithic)
     implementation 'com.github.ben-manes.caffeine:caffeine'
 
-    // Database
-    runtimeOnly 'com.h2database:h2'
+    // Database - PostgreSQL (production-ready)
+    runtimeOnly 'org.postgresql:postgresql'
 
     // Lombok
     compileOnly 'org.projectlombok:lombok'

@@ -2,26 +2,26 @@ spring:
   application:
     name: goeats-monolithic
 
-  # Single database for all domains
+  # Single PostgreSQL database for all domains (public schema)
   datasource:
-    url: jdbc:h2:mem:goeats
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
-
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+    url: jdbc:postgresql://localhost:5432/goeats
+    driver-class-name: org.postgresql.Driver
+    username: goeats
+    password: goeats1234
 
   jpa:
+    open-in-view: false                    # OSIV off - protect connection pool
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
         format_sql: true
-        default_batch_fetch_size: 100
+        jdbc:
+          batch_size: 50                   # Batch INSERT/UPDATE size
+        order_inserts: true                # Sort INSERTs for batching
+        order_updates: true                # Sort UPDATEs for batching
+        default_batch_fetch_size: 100      # N+1 prevention (IN clause batch)
 
   # Local cache (Caffeine) - no external dependency needed
   cache:
