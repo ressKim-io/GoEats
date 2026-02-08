@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: store-service
+
+  # ★ MSA: Separate database for store service
+  datasource:
+    url: jdbc:h2:mem:store_db
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+
+  # ★ MSA: Redis distributed cache (shared across instances)
+  # Compare with Monolithic: Caffeine local cache (single JVM)
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 600000  # 10 minutes
+
+server:
+  port: 8082
+
+logging:
+  level:
+    com.goeats: DEBUG
