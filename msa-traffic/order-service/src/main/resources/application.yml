@@ -1,0 +1,104 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: order-service
+
+  datasource:
+    url: jdbc:h2:mem:order_db
+    driver-class-name: org.h2.Driver
+    # ★ HikariCP tuning
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 3000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  # ★ Kafka configuration with optimizations
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      # ★ Delivery guarantee
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: order-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.goeats.common.event"
+      # ★ At-least-once: commit after processing
+      enable-auto-commit: false
+    listener:
+      ack-mode: record
+
+# ★★★ Resilience4j 5-pattern configuration
+resilience4j:
+  # 1. Retry: transient failure recovery
+  retry:
+    instances:
+      storeService:
+        maxAttempts: 3
+        waitDuration: 500ms
+        retryExceptions:
+          - java.io.IOException
+          - feign.FeignException.ServiceUnavailable
+
+  # 2. Circuit Breaker: cascading failure prevention
+  circuitbreaker:
+    instances:
+      storeService:
+        registerHealthIndicator: true
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+
+  # 3. Bulkhead: thread isolation
+  bulkhead:
+    instances:
+      orderCreation:
+        maxConcurrentCalls: 20
+        maxWaitDuration: 500ms
+
+  # 4. Rate Limiter: traffic control
+  ratelimiter:
+    instances:
+      orderApi:
+        limitForPeriod: 50
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0s
+
+  # 5. Time Limiter: timeout control
+  timelimiter:
+    instances:
+      storeService:
+        timeoutDuration: 5s
+        cancelRunningFuture: true
+
+# ★ Actuator + Prometheus metrics
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  metrics:
+    tags:
+      application: order-service

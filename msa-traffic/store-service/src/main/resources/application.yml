@@ -1,0 +1,73 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: store-service
+
+  datasource:
+    url: jdbc:h2:mem:store_db
+    driver-class-name: org.h2.Driver
+    # ★ HikariCP tuning for traffic resilience
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 3000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+  # ★ Redis distributed cache
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  cache:
+    type: redis
+
+# ★ Resilience4j 5-pattern configuration
+resilience4j:
+  # Circuit Breaker for DB access
+  circuitbreaker:
+    instances:
+      storeDb:
+        registerHealthIndicator: true
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+
+  # ★ Rate Limiter per API
+  ratelimiter:
+    instances:
+      storeApi:
+        limitForPeriod: 100
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0s
+      menuApi:
+        limitForPeriod: 200
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0s
+
+  # Bulkhead for concurrent request isolation
+  bulkhead:
+    instances:
+      storeDb:
+        maxConcurrentCalls: 25
+        maxWaitDuration: 500ms
+
+# ★ Actuator + Prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus, caches
+  metrics:
+    tags:
+      application: store-service

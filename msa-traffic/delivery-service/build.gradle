@@ -1,0 +1,29 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    implementation project(':common:common-dto')
+    implementation project(':common:common-exception')
+    implementation project(':common:common-outbox')
+    implementation project(':common:common-resilience')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // ★ Kafka for event-driven communication
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // ★ Redis + Redisson for distributed lock with fencing token
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.redisson:redisson-spring-boot-starter:3.27.0'
+
+    // ★ Resilience4j
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
+
+    // ★ ShedLock: prevents duplicate Outbox Relay execution across instances
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:5.10.0'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-redis-spring:5.10.0'
+
+    runtimeOnly 'com.h2database:h2'
+}

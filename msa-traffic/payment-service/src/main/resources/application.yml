@@ -1,0 +1,77 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: payment-service
+
+  datasource:
+    url: jdbc:h2:mem:payment_db
+    driver-class-name: org.h2.Driver
+    # ★ HikariCP tuning
+    hikari:
+      maximum-pool-size: 15
+      minimum-idle: 5
+      connection-timeout: 3000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+  # ★ Kafka configuration
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: payment-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.goeats.common.event"
+      enable-auto-commit: false
+    listener:
+      ack-mode: record
+
+# ★ Resilience4j configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      paymentProcessing:
+        registerHealthIndicator: true
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+
+  ratelimiter:
+    instances:
+      paymentApi:
+        limitForPeriod: 30
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0s
+
+  bulkhead:
+    instances:
+      paymentProcessing:
+        maxConcurrentCalls: 15
+        maxWaitDuration: 500ms
+
+# ★ Actuator + Prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  metrics:
+    tags:
+      application: payment-service
