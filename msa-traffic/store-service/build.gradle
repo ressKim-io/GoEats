@@ -1,0 +1,21 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    implementation project(':common:common-dto')
+    implementation project(':common:common-exception')
+    implementation project(':common:common-resilience')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
+
+    // ★ Redis distributed cache (vs Monolithic: Caffeine local cache)
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // ★ Resilience4j for Rate Limiting + Circuit Breaker
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
+
+    runtimeOnly 'com.h2database:h2'
+}
