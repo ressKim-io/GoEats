@@ -8,13 +8,16 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 
 @Entity
-@Table(name = "menus")
+@Table(name = "menus", indexes = {
+        @Index(name = "idx_menu_store_available", columnList = "store_id, available")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Menu implements Serializable {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "menu_seq")
+    @SequenceGenerator(name = "menu_seq", sequenceName = "menu_seq", allocationSize = 50)
     private Long id;
 
     @Column(nullable = false)

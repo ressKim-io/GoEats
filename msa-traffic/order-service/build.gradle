@@ -23,5 +23,5 @@ dependencies {
     // ★ Redis for idempotency cache
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
-    runtimeOnly 'com.h2database:h2'
+    runtimeOnly 'org.postgresql:postgresql'
 }

@@ -14,7 +14,8 @@ import java.util.List;
 public class Store implements Serializable {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "store_seq")
+    @SequenceGenerator(name = "store_seq", sequenceName = "store_seq", allocationSize = 50)
     private Long id;
 
     @Column(nullable = false)

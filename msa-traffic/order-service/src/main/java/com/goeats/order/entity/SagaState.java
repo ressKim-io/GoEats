@@ -24,14 +24,18 @@ import java.time.LocalDateTime;
  * This entity makes the saga state queryable and auditable.
  */
 @Entity
-@Table(name = "saga_states")
+@Table(name = "saga_states", indexes = {
+        @Index(name = "idx_saga_order_id", columnList = "orderId"),
+        @Index(name = "idx_saga_status", columnList = "status")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @EntityListeners(AuditingEntityListener.class)
 public class SagaState {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "saga_state_seq")
+    @SequenceGenerator(name = "saga_state_seq", sequenceName = "saga_state_seq", allocationSize = 50)
     private Long id;
 
     @Column(nullable = false, unique = true)

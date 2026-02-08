@@ -29,7 +29,8 @@ import java.time.LocalDateTime;
 public class OutboxEvent {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "outbox_event_seq")
+    @SequenceGenerator(name = "outbox_event_seq", sequenceName = "outbox_event_seq", allocationSize = 50)
     private Long id;
 
     @Column(nullable = false)
