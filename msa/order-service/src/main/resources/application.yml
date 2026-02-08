@@ -2,20 +2,27 @@ spring:
   application:
     name: order-service
 
-  # ★ MSA: Separate database for order service only
+  # ★ MSA: Schema-separated PostgreSQL (order_schema)
   datasource:
-    url: jdbc:h2:mem:order_db
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    url: jdbc:postgresql://localhost:5432/goeats?currentSchema=order_schema
+    driver-class-name: org.postgresql.Driver
+    username: goeats
+    password: goeats1234
 
   jpa:
+    open-in-view: false
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
         format_sql: true
+        default_schema: order_schema
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        default_batch_fetch_size: 100
 
   # ★ MSA: Kafka for inter-service event communication
   kafka:

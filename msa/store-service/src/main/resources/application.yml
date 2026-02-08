@@ -2,17 +2,26 @@ spring:
   application:
     name: store-service
 
-  # ★ MSA: Separate database for store service
+  # ★ MSA: Schema-separated PostgreSQL (store_schema)
   datasource:
-    url: jdbc:h2:mem:store_db
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    url: jdbc:postgresql://localhost:5432/goeats?currentSchema=store_schema
+    driver-class-name: org.postgresql.Driver
+    username: goeats
+    password: goeats1234
 
   jpa:
+    open-in-view: false
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: true
+    properties:
+      hibernate:
+        default_schema: store_schema
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        default_batch_fetch_size: 100
 
   # ★ MSA: Redis distributed cache (shared across instances)
   # Compare with Monolithic: Caffeine local cache (single JVM)

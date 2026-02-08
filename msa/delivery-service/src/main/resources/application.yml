@@ -2,17 +2,26 @@ spring:
   application:
     name: delivery-service
 
-  # ★ MSA: Separate database + Redis
+  # ★ MSA: Schema-separated PostgreSQL (delivery_schema)
   datasource:
-    url: jdbc:h2:mem:delivery_db
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    url: jdbc:postgresql://localhost:5432/goeats?currentSchema=delivery_schema
+    driver-class-name: org.postgresql.Driver
+    username: goeats
+    password: goeats1234
 
   jpa:
+    open-in-view: false
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: true
+    properties:
+      hibernate:
+        default_schema: delivery_schema
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        default_batch_fetch_size: 100
 
   # ★ MSA: Redis for distributed lock + GEO rider matching
   data:

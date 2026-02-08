@@ -2,17 +2,26 @@ spring:
   application:
     name: payment-service
 
-  # ★ MSA: Separate database for payment service
+  # ★ MSA: Schema-separated PostgreSQL (payment_schema)
   datasource:
-    url: jdbc:h2:mem:payment_db
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    url: jdbc:postgresql://localhost:5432/goeats?currentSchema=payment_schema
+    driver-class-name: org.postgresql.Driver
+    username: goeats
+    password: goeats1234
 
   jpa:
+    open-in-view: false
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: true
+    properties:
+      hibernate:
+        default_schema: payment_schema
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        default_batch_fetch_size: 100
 
   kafka:
     bootstrap-servers: localhost:9092
