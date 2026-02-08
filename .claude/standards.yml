@@ -1,0 +1,143 @@
+# Coding Standards Configuration
+# Central configuration for hardcoded values across all commands
+
+# ============================================
+# Code Quality Standards
+# ============================================
+code_quality:
+  # Function/Method length limits
+  max_function_lines:
+    default: 30
+    go: 30
+    java: 30
+    kotlin: 30
+
+  # Parameter count limits
+  max_parameters:
+    default: 4
+    go: 4
+    java: 4
+
+  # Nesting depth limits
+  max_nesting_depth:
+    default: 3
+    go: 3
+
+  # Test coverage thresholds
+  test_coverage:
+    minimum: 80
+    recommended: 90
+
+# ============================================
+# PR/Commit Standards
+# ============================================
+git:
+  # PR size limits
+  pr_max_lines: 400
+
+  # Commit message format
+  commit_types:
+    - feat      # New feature
+    - fix       # Bug fix
+    - docs      # Documentation
+    - style     # Formatting
+    - refactor  # Code refactoring
+    - test      # Tests
+    - chore     # Maintenance
+
+  # Branch naming patterns
+  branch_patterns:
+    feature: "feature/#<issue>-<description>"
+    fix: "fix/#<issue>-<description>"
+    hotfix: "hotfix/#<issue>-<description>"
+
+# ============================================
+# Security Standards
+# ============================================
+security:
+  # Kubernetes security context
+  k8s:
+    run_as_non_root: true
+    run_as_user: 1000
+    run_as_group: 1000
+    fs_group: 1000
+    allow_privilege_escalation: false
+    read_only_root_filesystem: true
+    capabilities_drop: ["ALL"]
+    seccomp_profile: "RuntimeDefault"
+
+  # Terraform security
+  terraform:
+    min_provider_version: "5.0"
+    required_terraform_version: ">= 1.0"
+
+  # Forbidden patterns (regex)
+  forbidden_patterns:
+    - "password\\s*="
+    - "secret\\s*="
+    - "api_key\\s*="
+    - "0\\.0\\.0\\.0/0"  # Open CIDR
+    - "\\*:\\*"         # IAM wildcard
+
+# ============================================
+# Review Severity Levels
+# ============================================
+severity_levels:
+  critical:
+    description: "즉시 수정 필요"
+    examples:
+      - SQL Injection
+      - Hardcoded secrets
+      - Open security groups
+      - Data loss risk
+
+  high:
+    description: "배포 전 수정 권장"
+    examples:
+      - Missing error handling
+      - N+1 queries
+      - Missing resource limits
+      - Missing probes
+
+  medium:
+    description: "개선 권장"
+    examples:
+      - Missing labels
+      - Default ServiceAccount
+      - Missing PDB
+
+  low:
+    description: "참고"
+    examples:
+      - Naming conventions
+      - Code style
+      - Documentation
+
+# ============================================
+# Session Management
+# ============================================
+session:
+  # Auto-create conditions
+  auto_create_task_threshold: 3
+  context_file: ".claude/session-context.md"
+
+  # Auto-delete conditions
+  auto_delete_on_completion: true
+
+# ============================================
+# Changelog Categories
+# ============================================
+changelog:
+  type_mapping:
+    feat: "Added"
+    fix: "Fixed"
+    refactor: "Changed"
+    perf: "Changed"
+    deprecate: "Deprecated"
+    remove: "Removed"
+    security: "Security"
+
+  version_bump:
+    breaking: "major"  # feat!:
+    feature: "minor"   # feat:
+    fix: "patch"       # fix:
