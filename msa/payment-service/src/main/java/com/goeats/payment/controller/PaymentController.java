@@ -1,0 +1,20 @@
+package com.goeats.payment.controller;
+
+import com.goeats.common.dto.ApiResponse;
+import com.goeats.payment.entity.Payment;
+import com.goeats.payment.service.PaymentService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/payments")
+@RequiredArgsConstructor
+public class PaymentController {
+
+    private final PaymentService paymentService;
+
+    @GetMapping("/order/{orderId}")
+    public ApiResponse<Payment> getPaymentByOrder(@PathVariable Long orderId) {
+        return ApiResponse.ok(paymentService.getPayment(orderId));
+    }
+}
