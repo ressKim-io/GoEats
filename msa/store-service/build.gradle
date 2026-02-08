@@ -1,0 +1,17 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    implementation project(':common:common-dto')
+    implementation project(':common:common-exception')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
+
+    // ★ MSA: Redis distributed cache (instead of Caffeine local cache)
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    runtimeOnly 'com.h2database:h2'
+}
