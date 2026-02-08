@@ -1,0 +1,12 @@
+rootProject.name = 'goeats-msa'
+
+// Common modules
+include 'common:common-dto'
+include 'common:common-security'
+include 'common:common-exception'
+
+// Microservices
+include 'order-service'
+include 'payment-service'
+include 'delivery-service'
+include 'store-service'
