@@ -1,0 +1,15 @@
+rootProject.name = 'goeats-msa-traffic'
+
+// Common modules
+include 'common:common-dto'
+include 'common:common-security'
+include 'common:common-exception'
+include 'common:common-outbox'
+include 'common:common-resilience'
+
+// Services
+include 'gateway-service'
+include 'order-service'
+include 'store-service'
+include 'payment-service'
+include 'delivery-service'
