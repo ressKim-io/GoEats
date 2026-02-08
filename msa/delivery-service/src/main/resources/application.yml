@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: delivery-service
+
+  # ★ MSA: Separate database + Redis
+  datasource:
+    url: jdbc:h2:mem:delivery_db
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+
+  # ★ MSA: Redis for distributed lock + GEO rider matching
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: delivery-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.goeats.common.event"
+
+server:
+  port: 8084
+
+logging:
+  level:
+    com.goeats: DEBUG
