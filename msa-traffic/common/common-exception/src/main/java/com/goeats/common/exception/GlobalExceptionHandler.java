@@ -126,4 +126,20 @@ public class GlobalExceptionHandler {
         problem.setType(URI.create("https://goeats.com/errors/request_timeout"));
         return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(problem);
     }
+
+    /**
+     * Bean Validation 실패 시 처리 (@Valid 검증 실패).
+     * 요청 DTO의 필드 검증 실패 메시지를 모아서 반환한다.
+     */
+    @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
+    public ResponseEntity<ProblemDetail> handleValidationException(
+            org.springframework.web.bind.MethodArgumentNotValidException e) {
+        String message = e.getBindingResult().getFieldErrors().stream()
+                .map(error -> error.getField() + ": " + error.getDefaultMessage())
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("Validation failed");
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, message);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
 }

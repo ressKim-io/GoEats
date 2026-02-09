@@ -3,9 +3,11 @@ package com.goeats.order.controller;
 import com.goeats.common.dto.ApiResponse;
 import com.goeats.common.exception.BusinessException;
 import com.goeats.common.exception.ErrorCode;
+import com.goeats.order.dto.CreateOrderRequest;
 import com.goeats.order.entity.Order;
 import com.goeats.order.service.OrderService;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -82,11 +84,7 @@ public class OrderController {
     @RateLimiter(name = "orderApi")
     public ApiResponse<Order> createOrder(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestParam Long userId,
-            @RequestParam Long storeId,
-            @RequestParam List<Long> menuIds,
-            @RequestParam String paymentMethod,
-            @RequestParam String deliveryAddress) {
+            @Valid @RequestBody CreateOrderRequest request) {
 
         // ★ Idempotency check via Redis
         // ★ Redis SETNX로 원자적 중복 확인: 키가 이미 존재하면 중복 요청
@@ -103,7 +101,8 @@ public class OrderController {
         }
 
         return ApiResponse.ok(orderService.createOrder(
-                userId, storeId, menuIds, paymentMethod, deliveryAddress));
+                request.userId(), request.storeId(), request.menuIds(),
+                request.paymentMethod(), request.deliveryAddress()));
     }
 
     /** 주문 단건 조회 (Fetch Join으로 OrderItem까지 한 번에 로딩) */

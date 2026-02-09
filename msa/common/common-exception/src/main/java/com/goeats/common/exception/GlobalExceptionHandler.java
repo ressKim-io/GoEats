@@ -59,6 +59,22 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Bean Validation 실패 시 처리 (@Valid 검증 실패).
+     * 요청 DTO의 필드 검증 실패 메시지를 모아서 반환한다.
+     */
+    @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
+    public ResponseEntity<ProblemDetail> handleValidationException(
+            org.springframework.web.bind.MethodArgumentNotValidException e) {
+        String message = e.getBindingResult().getFieldErrors().stream()
+                .map(error -> error.getField() + ": " + error.getDefaultMessage())
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("Validation failed");
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                org.springframework.http.HttpStatus.BAD_REQUEST, message);
+        return ResponseEntity.status(org.springframework.http.HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    /**
      * 예상치 못한 예외 처리 - 500 Internal Server Error로 응답.
      * 보안을 위해 실제 예외 메시지는 클라이언트에 노출하지 않고, 로그에만 기록한다.
      */

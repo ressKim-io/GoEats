@@ -1,8 +1,10 @@
 package com.goeats.order.controller;
 
 import com.goeats.common.dto.ApiResponse;
+import com.goeats.order.dto.CreateOrderRequest;
 import com.goeats.order.entity.Order;
 import com.goeats.order.service.OrderService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -46,13 +48,10 @@ public class OrderController {
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<Order> createOrder(@RequestParam Long userId,
-                                          @RequestParam Long storeId,
-                                          @RequestParam List<Long> menuIds,
-                                          @RequestParam String paymentMethod,
-                                          @RequestParam String deliveryAddress) {
+    public ApiResponse<Order> createOrder(@Valid @RequestBody CreateOrderRequest request) {
         return ApiResponse.ok(orderService.createOrder(
-                userId, storeId, menuIds, paymentMethod, deliveryAddress));
+                request.userId(), request.storeId(), request.menuIds(),
+                request.paymentMethod(), request.deliveryAddress()));
     }
 
     // 주문 단건 조회 - 클라이언트가 주문 상태를 폴링할 때 사용
