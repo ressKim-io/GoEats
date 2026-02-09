@@ -7,10 +7,10 @@ spring:
 
   # ★ MSA-Traffic: Schema-separated PostgreSQL (store_schema)
   datasource:
-    url: jdbc:postgresql://localhost:5432/goeats?currentSchema=store_schema
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/goeats?currentSchema=store_schema}
     driver-class-name: org.postgresql.Driver
-    username: goeats
-    password: goeats1234
+    username: ${DB_USERNAME:goeats}
+    password: ${DB_PASSWORD:goeats1234}
     # ★ HikariCP tuning for traffic resilience
     hikari:
       maximum-pool-size: 20
@@ -36,8 +36,8 @@ spring:
   # ★ Redis distributed cache
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
 
   cache:
     type: redis

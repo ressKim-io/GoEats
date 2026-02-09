@@ -4,10 +4,10 @@ spring:
 
   # ★ MSA: Schema-separated PostgreSQL (payment_schema)
   datasource:
-    url: jdbc:postgresql://localhost:5432/goeats?currentSchema=payment_schema
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/goeats?currentSchema=payment_schema}
     driver-class-name: org.postgresql.Driver
-    username: goeats
-    password: goeats1234
+    username: ${DB_USERNAME:goeats}
+    password: ${DB_PASSWORD:goeats1234}
 
   jpa:
     open-in-view: false
@@ -24,7 +24,7 @@ spring:
         default_batch_fetch_size: 100
 
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
