@@ -41,27 +41,6 @@ GoEats/
 | [MSA Traffic 상세](docs/03-msa-traffic.md) | 15가지 프로덕션 패턴, 기술, 주의점 |
 | [3-Way 코드 비교](docs/04-pattern-comparison.md) | 패턴별 코드 스니펫 비교 |
 | [트래픽 시나리오](docs/05-traffic-scenarios.md) | 주문 폭주, 장애, 이중 결제 등 대응 전략 |
-| [빌드/실행 가이드](docs/06-setup-guide.md) | Docker 빌드, 인프라 설정 |
-
----
-
-## Quick Start
-
-```bash
-# 1. 인프라 실행 (PostgreSQL, Kafka, Redis)
-docker-compose up -d
-
-# 2. Monolithic 빌드
-docker run --rm -v "$(pwd)/monolithic:/project" -w /project \
-  gradle:8.12-jdk17 gradle build -x test -Djavax.net.ssl.protocols=TLSv1.2
-
-# 3. MSA Traffic 빌드
-docker run --rm -v "$(pwd)/msa-traffic:/project" -w /project \
-  gradle:8.12-jdk17 gradle build -x test -Djavax.net.ssl.protocols=TLSv1.2
-```
-
-자세한 실행 방법은 [빌드/실행 가이드](docs/06-setup-guide.md)를 참고하세요.
-
 ---
 
 ## 참고

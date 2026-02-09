@@ -172,4 +172,3 @@ Client ── POST /api/orders ──> Gateway (:8080)
 - [03-msa-traffic.md](./03-msa-traffic.md) - MSA Traffic 핵심 기술과 주의점
 - [04-pattern-comparison.md](./04-pattern-comparison.md) - 3-Way 코드 비교
 - [05-traffic-scenarios.md](./05-traffic-scenarios.md) - 트래픽 시나리오별 대응
-- [06-setup-guide.md](./06-setup-guide.md) - 빌드 및 실행 가이드
