@@ -2,6 +2,7 @@ package com.goeats.common.outbox;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -86,6 +87,8 @@ public class OutboxRelay {
      * 이는 "주문 생성 → 결제 완료" 순서가 뒤바뀌는 것을 방지.
      */
     @Scheduled(fixedDelay = 1000) // 이전 실행 완료 후 1초 뒤에 다시 실행
+    @SchedulerLock(name = "OutboxRelay_publishPendingEvents",
+            lockAtMostFor = "30s", lockAtLeastFor = "5s")
     @Transactional // Kafka 전송 성공 후 markPublished() 업데이트를 같은 트랜잭션으로 묶음
     public void publishPendingEvents() {
         // 1단계: 미발행 이벤트 FIFO 조회
