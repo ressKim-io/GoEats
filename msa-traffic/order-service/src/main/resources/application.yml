@@ -38,27 +38,53 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
-  # ★ Kafka configuration with optimizations
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      # ★ Delivery guarantee
-      acks: all
-      retries: 3
-      properties:
-        enable.idempotence: true
-    consumer:
-      group-id: order-service
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      properties:
-        spring.json.trusted.packages: "com.goeats.common.event"
-      # ★ At-least-once: commit after processing
-      enable-auto-commit: false
-    listener:
-      ack-mode: record
+  # ★ Spring Cloud Stream: broker-abstracted messaging
+  cloud:
+    function:
+      # Register consumer beans (comma-separated for multiple)
+      definition: handlePaymentCompleted;handlePaymentFailed
+    stream:
+      # ★ Binding → Topic mapping
+      bindings:
+        # --- Producer bindings (OutboxRelay uses StreamBridge) ---
+        orderEvents-out-0:
+          destination: order-events
+        # --- Consumer bindings ---
+        handlePaymentCompleted-in-0:
+          destination: payment-events
+          group: order-service
+          consumer:
+            max-attempts: 4
+            back-off-initial-interval: 1000
+            back-off-multiplier: 2.0
+            back-off-max-interval: 10000
+        handlePaymentFailed-in-0:
+          destination: payment-failed-events
+          group: order-service
+          consumer:
+            max-attempts: 4
+            back-off-initial-interval: 1000
+            back-off-multiplier: 2.0
+            back-off-max-interval: 10000
+      # ★ Kafka binder configuration
+      kafka:
+        binder:
+          brokers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+          producer-properties:
+            acks: all
+            retries: 3
+            enable.idempotence: true
+          consumer-properties:
+            spring.json.trusted.packages: com.goeats.common.event
+        bindings:
+          handlePaymentCompleted-in-0:
+            consumer:
+              enable-dlq: true
+              dlq-name: payment-events.order-service.dlq
+          handlePaymentFailed-in-0:
+            consumer:
+              enable-dlq: true
+              dlq-name: payment-failed-events.order-service.dlq
 
 # ★★★ Resilience4j 5-pattern configuration
 resilience4j:

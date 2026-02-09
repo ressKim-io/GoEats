@@ -39,25 +39,40 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
-  # ★ Kafka configuration
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all
-      retries: 3
-      properties:
-        enable.idempotence: true
-    consumer:
-      group-id: delivery-service
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      properties:
-        spring.json.trusted.packages: "com.goeats.common.event"
-      enable-auto-commit: false
-    listener:
-      ack-mode: record
+  # ★ Spring Cloud Stream: broker-abstracted messaging
+  cloud:
+    function:
+      definition: handlePaymentCompletedForDelivery
+    stream:
+      # ★ Binding → Topic mapping
+      bindings:
+        # --- Producer bindings (OutboxRelay uses StreamBridge) ---
+        deliveryEvents-out-0:
+          destination: delivery-events
+        # --- Consumer bindings ---
+        handlePaymentCompletedForDelivery-in-0:
+          destination: payment-events
+          group: delivery-service
+          consumer:
+            max-attempts: 4
+            back-off-initial-interval: 1000
+            back-off-multiplier: 2.0
+            back-off-max-interval: 10000
+      # ★ Kafka binder configuration
+      kafka:
+        binder:
+          brokers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+          producer-properties:
+            acks: all
+            retries: 3
+            enable.idempotence: true
+          consumer-properties:
+            spring.json.trusted.packages: com.goeats.common.event
+        bindings:
+          handlePaymentCompletedForDelivery-in-0:
+            consumer:
+              enable-dlq: true
+              dlq-name: payment-events.delivery-service.dlq
 
 # ★ Resilience4j - Bulkhead-centric configuration
 resilience4j:

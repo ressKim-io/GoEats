@@ -9,144 +9,98 @@ import com.goeats.payment.entity.PaymentStatus;
 import com.goeats.payment.service.PaymentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.kafka.annotation.DltHandler;
-import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.annotation.RetryableTopic;
-import org.springframework.kafka.retrytopic.TopicSuffixingStrategy;
-import org.springframework.retry.annotation.Backoff;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.Message;
+
+import java.util.function.Consumer;
 
 /**
- * 주문 이벤트 리스너 - Kafka에서 주문 생성 이벤트를 수신하여 결제를 처리한다.
+ * 주문 이벤트 리스너 - Spring Cloud Stream 함수형 Consumer
  *
- * <p>이 클래스는 Payment Service의 핵심 이벤트 처리기로, order-events 토픽에서
- * OrderCreatedEvent를 소비하여 결제를 생성하고, 결과를 Outbox 패턴으로 발행한다.</p>
+ * <p>order-events 토픽에서 OrderCreatedEvent를 소비하여 결제를 처리한다.
+ * Spring Cloud Stream의 함수형 모델을 사용하여 브로커에 독립적인 구현.</p>
+ *
+ * <h3>★ Spring Cloud Stream 마이그레이션</h3>
+ * <pre>
+ * Before (Kafka 직접 의존):
+ *   @Component
+ *   @KafkaListener(topics = "order-events")
+ *   @RetryableTopic(attempts = "4")
+ *   public void handleOrderCreated(OrderCreatedEvent event) { ... }
+ *
+ * After (브로커 추상화):
+ *   @Configuration
+ *   @Bean
+ *   public Consumer&lt;Message&lt;OrderCreatedEvent&gt;&gt; handleOrderCreated() {
+ *       return message -> { ... };
+ *   }
+ * </pre>
+ *
+ * <h3>@RetryableTopic 대체</h3>
+ * <p>Spring Cloud Stream의 바인더 레벨 재시도 + DLQ 설정으로 대체:</p>
+ * <pre>
+ *   spring.cloud.stream.bindings.handleOrderCreated-in-0.consumer:
+ *     maxAttempts: 4
+ *     backOffInitialInterval: 1000
+ *     backOffMultiplier: 2.0
+ *   spring.cloud.stream.kafka.bindings.handleOrderCreated-in-0.consumer:
+ *     enableDlq: true
+ *     dlqName: order-events.payment-service.dlq
+ * </pre>
+ *
+ * <h3>트랜잭션 처리</h3>
+ * <p>@Transactional은 함수형 빈에서 직접 사용할 수 없음 (Spring AOP 프록시 이슈).
+ * 별도 @Service인 OrderEventHandler로 트랜잭션 로직을 위임.</p>
  *
  * <h3>적용된 트래픽 패턴 (3중 보호)</h3>
  * <ol>
- *   <li><b>@RetryableTopic (재시도)</b> - 실패 시 최대 4회 자동 재시도.
- *       지수 백오프(1초 -> 2초 -> 4초)로 재시도 간격을 점진적으로 늘린다.
- *       재시도 토픽: order-events-retry-0, order-events-retry-1, order-events-retry-2</li>
- *   <li><b>@DltHandler (Dead Letter Topic)</b> - 모든 재시도 실패 후 DLT로 이동.
- *       운영자가 수동으로 확인하고 처리할 수 있도록 로그를 남긴다.</li>
- *   <li><b>Idempotent Consumer (멱등성)</b> - ProcessedEvent 테이블로 이미 처리한 이벤트를
- *       추적하여, 재시도나 중복 전달 시 같은 이벤트를 두 번 처리하지 않도록 방지한다.</li>
+ *   <li><b>재시도</b> - maxAttempts + 지수 백오프 (application.yml 설정)</li>
+ *   <li><b>DLQ</b> - enableDlq: true로 영구 실패 메시지 격리</li>
+ *   <li><b>Idempotent Consumer (멱등성)</b> - ProcessedEvent 테이블로 중복 방지</li>
  * </ol>
  *
- * <h3>이벤트 처리 흐름</h3>
- * <pre>
- *   Kafka(order-events)
- *     → 멱등성 체크 (ProcessedEvent 존재?)
- *     → PaymentService.processPayment() 호출
- *     → 결과에 따라 Outbox에 PaymentCompleted/PaymentFailed 이벤트 저장
- *     → ProcessedEvent 테이블에 처리 완료 기록
- *     → OutboxRelay가 @Scheduled로 Outbox → Kafka 발행
- * </pre>
+ * <h3>★ vs MSA Basic</h3>
+ * <p>MSA Basic: @KafkaListener + try/catch → 재시도 없음, 중복 처리 가능.
+ * Traffic: 함수형 Consumer + 바인더 재시도 + DLQ + 멱등성 = 3중 보호.</p>
  *
- * <h3>★★★ vs MSA Basic</h3>
- * <p>MSA Basic에서는 @KafkaListener + try/catch만 사용했다.
- * 이 경우 처리 실패 시 메시지가 유실되거나, 재시도 시 중복 처리되는 문제가 있었다.
- * Traffic에서는 재시도(@RetryableTopic) + DLQ(@DltHandler) + 멱등성(ProcessedEvent) 3중 보호로
- * 메시지 유실과 중복 처리를 모두 방지한다.</p>
+ * <h3>★ vs Monolithic</h3>
+ * <p>Monolithic: 동기적 직접 호출 → 이벤트 리스너 불필요.
+ * MSA: 비동기 이벤트 기반 통신 → 재시도/DLQ/멱등성 필수.</p>
  *
- * <h3>★★★ vs Monolithic</h3>
- * <p>Monolithic에서는 OrderService가 PaymentService를 직접 호출(@Transactional)하므로
- * 실패 시 전체 트랜잭션이 롤백되어 이런 패턴이 필요 없었다.
- * MSA에서는 네트워크 분리로 인해 "메시지 전달 보장"이라는 새로운 과제가 생기며,
- * 이를 해결하기 위해 재시도, DLQ, 멱등성이라는 3가지 패턴이 필수적이다.</p>
+ * ★ Spring Cloud Stream functional Consumer for OrderCreatedEvent
+ *
+ * vs Before: @KafkaListener + @RetryableTopic (Kafka-specific)
+ * vs After:  Consumer<Message<T>> bean (broker-independent)
+ *
+ * Retry/DLQ configuration moved to application.yml
+ * → Switch from Kafka to GCP Pub/Sub with ZERO code changes
  */
 @Slf4j
-@Component
+@Configuration
 @RequiredArgsConstructor
 public class OrderEventListener {
 
-    private final PaymentService paymentService;
-    private final OutboxService outboxService;  // Outbox 패턴 - DB에 이벤트를 원자적으로 저장
-    private final ProcessedEventRepository processedEventRepository;  // 멱등성 체크용 저장소
+    private final OrderEventHandler orderEventHandler;
 
     /**
-     * 주문 생성 이벤트 핸들러.
+     * 주문 생성 이벤트 Consumer 빈.
      *
-     * <p>@RetryableTopic: 실패 시 최대 4회 재시도 (원본 1회 + 재시도 3회).
-     * 지수 백오프로 1초 -> 2초 -> 4초 간격으로 재시도한다.
-     * SUFFIX_WITH_INDEX_VALUE 전략으로 재시도 토픽명에 인덱스를 붙인다
-     * (예: order-events-retry-0, order-events-retry-1).</p>
+     * <p>함수 빈 이름 "handleOrderCreated"가 Spring Cloud Stream 바인딩과 매핑된다.
+     * application.yml에서 handleOrderCreated-in-0 바인딩이 order-events 토픽을 구독.</p>
      *
-     * @param event 주문 생성 이벤트 (orderId, totalAmount, paymentMethod, eventId 포함)
+     * <p>재시도/DLQ 설정은 application.yml로 이동 (코드에서 제거):</p>
+     * <ul>
+     *   <li>maxAttempts: 4 (최초 1회 + 재시도 3회)</li>
+     *   <li>backOff: 1초 → 2초 → 4초 (지수 백오프)</li>
+     *   <li>enableDlq: true (DLQ로 영구 실패 메시지 격리)</li>
+     * </ul>
      */
-    @RetryableTopic(
-            attempts = "4",
-            backoff = @Backoff(delay = 1000, multiplier = 2.0),
-            topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,
-            dltStrategy = org.springframework.kafka.retrytopic.DltStrategy.ALWAYS_RETRY_ON_ERROR
-    )
-    @KafkaListener(topics = "order-events", groupId = "payment-service")
-    @Transactional  // 결제 처리 + ProcessedEvent 저장 + Outbox 저장을 하나의 트랜잭션으로 묶음
-    public void handleOrderCreated(OrderCreatedEvent event) {
-        // ★ Idempotent check - 이미 처리한 이벤트인지 확인 (중복 방지)
-        if (processedEventRepository.existsById(event.eventId())) {
-            log.info("Duplicate event skipped: eventId={}", event.eventId());
-            return;  // 이미 처리됨 → 스킵 (멱등성 보장)
-        }
-
-        log.info("Processing OrderCreatedEvent: orderId={}, eventId={}",
-                event.orderId(), event.eventId());
-
-        try {
-            // 결제 처리 (PaymentService의 이중 멱등성 체크 포함)
-            Payment payment = paymentService.processPayment(
-                    event.orderId(), event.totalAmount(),
-                    event.paymentMethod(), event.eventId());
-
-            if (payment.getStatus() == PaymentStatus.COMPLETED) {
-                // ★ Outbox: atomic payment result publishing
-                // 결제 성공 이벤트를 Outbox 테이블에 저장 (같은 트랜잭션 내에서 원자적으로)
-                PaymentCompletedEvent completedEvent = new PaymentCompletedEvent(
-                        payment.getId(), event.orderId(),
-                        event.totalAmount(), event.paymentMethod());
-
-                // OutboxService가 outbox 테이블에 INSERT → 나중에 OutboxRelay가 Kafka로 발행
-                outboxService.saveEvent("Payment", payment.getId().toString(),
-                        "PaymentCompleted", completedEvent);
-
-                log.info("Payment completed, outbox event saved: orderId={}", event.orderId());
-            } else {
-                // 결제 실패 이벤트를 Outbox에 저장 → Saga 보상 트랜잭션 트리거
-                PaymentFailedEvent failedEvent = new PaymentFailedEvent(
-                        event.orderId(), "Payment processing failed");
-
-                outboxService.saveEvent("Payment", event.orderId().toString(),
-                        "PaymentFailed", failedEvent);
-
-                log.warn("Payment failed, outbox event saved: orderId={}", event.orderId());
-            }
-        } catch (Exception e) {
-            log.error("Payment processing error: orderId={}", event.orderId(), e);
-            // 예외 발생 시에도 실패 이벤트를 Outbox에 저장하여 Saga 보상 가능
-            PaymentFailedEvent failedEvent = new PaymentFailedEvent(
-                    event.orderId(), e.getMessage());
-            outboxService.saveEvent("Payment", event.orderId().toString(),
-                    "PaymentFailed", failedEvent);
-        }
-
-        // ★ Mark as processed - 이벤트 처리 완료 기록 (다음에 같은 이벤트가 오면 스킵됨)
-        processedEventRepository.save(new ProcessedEvent(event.eventId()));
-    }
-
-    /**
-     * Dead Letter Topic 핸들러.
-     *
-     * <p>@RetryableTopic의 모든 재시도가 실패한 후 DLT(Dead Letter Topic)로 이동된 메시지를 처리한다.
-     * 자동 복구가 불가능한 상황이므로, 운영자 수동 개입이 필요하다는 것을 로그로 알린다.</p>
-     *
-     * <p>실무에서는 Slack/PagerDuty 알림, 관리자 대시보드 기록 등의 후속 처리를 추가한다.</p>
-     *
-     * @param event 재시도 실패한 주문 생성 이벤트
-     */
-    @DltHandler
-    public void handleDlt(OrderCreatedEvent event) {
-        log.error("OrderCreatedEvent sent to DLT. Manual intervention required: orderId={}",
-                event.orderId());
+    @Bean
+    public Consumer<Message<OrderCreatedEvent>> handleOrderCreated() {
+        return message -> {
+            OrderCreatedEvent event = message.getPayload();
+            orderEventHandler.handle(event);
+        };
     }
 }

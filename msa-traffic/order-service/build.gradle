@@ -15,8 +15,9 @@ dependencies {
     // ★ OpenFeign for inter-service HTTP calls
     implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
 
-    // ★ Kafka for event-driven communication
-    implementation 'org.springframework.kafka:spring-kafka'
+    // ★ Spring Cloud Stream + Kafka binder for broker-abstracted messaging
+    implementation 'org.springframework.cloud:spring-cloud-stream'
+    implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka'
 
     // ★ Resilience4j full stack (CB + Retry + Bulkhead + RateLimiter + TimeLimiter)
     implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
