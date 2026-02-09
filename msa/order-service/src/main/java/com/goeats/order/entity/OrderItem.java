@@ -41,4 +41,16 @@ public class OrderItem {
     public BigDecimal getSubtotal() {
         return price.multiply(BigDecimal.valueOf(quantity));
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof OrderItem that)) return false;
+        return id != null && id.equals(that.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }

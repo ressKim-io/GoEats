@@ -45,6 +45,8 @@ import java.util.List;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)  // JPA 프록시 생성용 기본 생성자
 public class Store implements Serializable {  // ★ Redis 캐시 저장을 위한 Serializable 구현
 
+    private static final long serialVersionUID = 1L;
+
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "store_seq")
     @SequenceGenerator(name = "store_seq", sequenceName = "store_seq", allocationSize = 50)
@@ -79,5 +81,17 @@ public class Store implements Serializable {  // ★ Redis 캐시 저장을 위�
     public void addMenu(Menu menu) {
         menus.add(menu);
         menu.setStore(this);  // Menu 쪽에도 Store 참조 설정 (양방향 동기화)
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Store that)) return false;
+        return id != null && id.equals(that.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
     }
 }

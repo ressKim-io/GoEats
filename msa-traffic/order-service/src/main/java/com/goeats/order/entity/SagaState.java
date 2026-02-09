@@ -136,4 +136,16 @@ public class SagaState {
         this.status = SagaStatus.FAILED;
         this.failureReason = reason;
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof SagaState that)) return false;
+        return id != null && id.equals(that.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }

@@ -47,6 +47,8 @@ import java.math.BigDecimal;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)  // JPA 프록시 생성용
 public class Menu implements Serializable {  // ★ Redis 캐시 저장을 위한 Serializable 구현
 
+    private static final long serialVersionUID = 1L;
+
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "menu_seq")
     @SequenceGenerator(name = "menu_seq", sequenceName = "menu_seq", allocationSize = 50)
@@ -74,5 +76,17 @@ public class Menu implements Serializable {  // ★ Redis 캐시 저장을 위�
         this.price = price;
         this.description = description;
         this.available = available;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Menu that)) return false;
+        return id != null && id.equals(that.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
     }
 }

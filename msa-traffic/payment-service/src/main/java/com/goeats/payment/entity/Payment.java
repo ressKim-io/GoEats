@@ -93,4 +93,16 @@ public class Payment {
 
     /** 환불 처리 - Saga 보상 트랜잭션 또는 수동 환불 시 호출 */
     public void refund() { this.status = PaymentStatus.REFUNDED; }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Payment that)) return false;
+        return id != null && id.equals(that.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }

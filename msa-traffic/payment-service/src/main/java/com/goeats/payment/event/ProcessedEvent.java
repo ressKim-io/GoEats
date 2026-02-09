@@ -65,4 +65,16 @@ public class ProcessedEvent {
         this.eventId = eventId;
         this.processedAt = LocalDateTime.now();
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof ProcessedEvent that)) return false;
+        return eventId != null && eventId.equals(that.getEventId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }

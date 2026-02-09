@@ -58,4 +58,16 @@ public class Payment {
     public void complete() { this.status = PaymentStatus.COMPLETED; }
     public void fail() { this.status = PaymentStatus.FAILED; }
     public void refund() { this.status = PaymentStatus.REFUNDED; }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Payment that)) return false;
+        return id != null && id.equals(that.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }

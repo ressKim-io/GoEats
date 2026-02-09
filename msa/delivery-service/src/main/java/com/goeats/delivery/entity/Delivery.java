@@ -61,4 +61,16 @@ public class Delivery {
     public void startDelivery() { this.status = DeliveryStatus.DELIVERING; }
     public void complete() { this.status = DeliveryStatus.DELIVERED; }
     public void cancel() { this.status = DeliveryStatus.CANCELLED; }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Delivery that)) return false;
+        return id != null && id.equals(that.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }
