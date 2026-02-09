@@ -6,6 +6,7 @@ import com.goeats.common.exception.ErrorCode;
 import com.goeats.common.outbox.OutboxService;
 import com.goeats.order.client.StoreServiceClient;
 import com.goeats.order.entity.*;
+import com.goeats.order.event.OrderStatusPublisher;
 import com.goeats.order.repository.OrderRepository;
 import com.goeats.order.repository.SagaStateRepository;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
@@ -76,6 +77,7 @@ public class OrderService {
     private final SagaStateRepository sagaStateRepository;
     private final StoreServiceClient storeServiceClient;   // OpenFeign: Store 서비스 HTTP 클라이언트
     private final OutboxService outboxService;             // Transactional Outbox: 이벤트 저장
+    private final OrderStatusPublisher orderStatusPublisher; // ★ Redis Pub/Sub: 실시간 상태 알림
 
     /**
      * 주문 생성 - 핵심 흐름
@@ -162,6 +164,9 @@ public class OrderService {
         outboxService.saveEvent("Order", order.getId().toString(),
                 "OrderCreated", event);
 
+        // 5. ★ Redis Pub/Sub: 실시간 주문 상태 알림 발행
+        orderStatusPublisher.publish(order.getId(), OrderStatus.PAYMENT_PENDING.name());
+
         log.info("Order created with Outbox event: orderId={}, sagaId={}", order.getId(), sagaId);
         return order;
     }
@@ -196,7 +201,30 @@ public class OrderService {
         sagaStateRepository.findByOrderId(orderId)
                 .ifPresent(saga -> saga.fail("User cancelled"));
 
+        // ★ Redis Pub/Sub: 취소 상태 실시간 알림
+        orderStatusPublisher.publish(orderId, OrderStatus.CANCELLED.name());
+
         return order;
+    }
+
+    /**
+     * 대기열에서 꺼낸 주문을 처리 (OrderQueueProcessor에서 호출).
+     *
+     * <p>이미 createOrder()에서 주문이 저장되고 Outbox 이벤트도 저장된 상태.
+     * 대기열에서 꺼낸 후에는 활성 주문 카운트만 관리하면 된다.</p>
+     *
+     * <p>Outbox Relay가 이미 이벤트를 브로커로 발행하므로,
+     * 여기서는 대기열 처리 완료 로그만 남긴다.</p>
+     *
+     * ★ Process queued order (called by OrderQueueProcessor)
+     *   Order + Outbox event already saved → just manage active count
+     */
+    @Transactional(readOnly = true)
+    public void processQueuedOrder(Long orderId) {
+        orderRepository.findById(orderId).ifPresent(order -> {
+            log.info("Queued order processing completed: orderId={}, status={}",
+                    orderId, order.getStatus());
+        });
     }
 
     /**

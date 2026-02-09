@@ -4,7 +4,9 @@ plugins {
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    implementation 'org.springframework.kafka:spring-kafka'
+    // ★ Spring Cloud Stream API only (no binder)
+    // Binder is injected by each service → broker-independent common module
+    implementation 'org.springframework.cloud:spring-cloud-stream'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
 
     // ShedLock: @SchedulerLock annotation for OutboxRelay

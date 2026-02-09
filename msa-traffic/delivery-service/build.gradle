@@ -11,8 +11,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 
-    // ★ Kafka for event-driven communication
-    implementation 'org.springframework.kafka:spring-kafka'
+    // ★ Spring Cloud Stream + Kafka binder for broker-abstracted messaging
+    implementation 'org.springframework.cloud:spring-cloud-stream'
+    implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka'
 
     // ★ Redis + Redisson for distributed lock with fencing token
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'

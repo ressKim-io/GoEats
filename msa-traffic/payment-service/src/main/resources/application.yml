@@ -39,25 +39,42 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
-  # ★ Kafka configuration
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all
-      retries: 3
-      properties:
-        enable.idempotence: true
-    consumer:
-      group-id: payment-service
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      properties:
-        spring.json.trusted.packages: "com.goeats.common.event"
-      enable-auto-commit: false
-    listener:
-      ack-mode: record
+  # ★ Spring Cloud Stream: broker-abstracted messaging
+  cloud:
+    function:
+      definition: handleOrderCreated
+    stream:
+      # ★ Binding → Topic mapping
+      bindings:
+        # --- Producer bindings (OutboxRelay uses StreamBridge) ---
+        paymentEvents-out-0:
+          destination: payment-events
+        paymentFailedEvents-out-0:
+          destination: payment-failed-events
+        # --- Consumer bindings ---
+        handleOrderCreated-in-0:
+          destination: order-events
+          group: payment-service
+          consumer:
+            max-attempts: 4
+            back-off-initial-interval: 1000
+            back-off-multiplier: 2.0
+            back-off-max-interval: 10000
+      # ★ Kafka binder configuration
+      kafka:
+        binder:
+          brokers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+          producer-properties:
+            acks: all
+            retries: 3
+            enable.idempotence: true
+          consumer-properties:
+            spring.json.trusted.packages: com.goeats.common.event
+        bindings:
+          handleOrderCreated-in-0:
+            consumer:
+              enable-dlq: true
+              dlq-name: order-events.payment-service.dlq
 
 # ★ Resilience4j configuration
 resilience4j:

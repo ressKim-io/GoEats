@@ -1,0 +1,46 @@
+# ★ GCP Pub/Sub Profile - Broker Portability Example
+#
+# This profile demonstrates how Spring Cloud Stream enables
+# switching from Kafka to GCP Pub/Sub with ZERO code changes.
+#
+# ┌─────────────────────────────────────────────────────────┐
+# │ Cost Comparison (Monthly)                               │
+# ├─────────────┬──────────┬────────────────────────────────┤
+# │ Broker      │ Cost     │ Notes                          │
+# ├─────────────┼──────────┼────────────────────────────────┤
+# │ Kafka (MSK) │ ~$200+   │ Minimum 2 brokers, always-on   │
+# │ GCP Pub/Sub │ ~$3-10   │ Pay-per-message, serverless    │
+# │ Redis Queue │ $0       │ Already using Redis             │
+# └─────────────┴──────────┴────────────────────────────────┘
+#
+# How to use:
+#   1. Add Pub/Sub binder dependency in build.gradle:
+#      implementation 'org.springframework.cloud:spring-cloud-gcp-pubsub-stream-binder'
+#   2. Remove Kafka binder:
+#      // implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka'
+#   3. Run with GCP profile:
+#      java -jar delivery-service.jar --spring.profiles.active=gcp
+#
+# ★ Code changes required: 0 lines
+
+spring:
+  cloud:
+    function:
+      definition: handlePaymentCompletedForDelivery
+    stream:
+      default-binder: pubsub
+      bindings:
+        # --- Producer bindings ---
+        deliveryEvents-out-0:
+          destination: delivery-events
+        # --- Consumer bindings ---
+        handlePaymentCompletedForDelivery-in-0:
+          destination: payment-events
+          group: delivery-service
+          consumer:
+            max-attempts: 4
+            back-off-initial-interval: 1000
+            back-off-multiplier: 2.0
+            back-off-max-interval: 10000
+    gcp:
+      project-id: ${GCP_PROJECT_ID}

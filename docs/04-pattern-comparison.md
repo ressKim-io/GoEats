@@ -10,7 +10,7 @@ Monolithic, MSA Basic, MSA Traffic에서 동일한 기능이 어떻게 다르게
 |-----------|-----------|-------------|
 | `eventPublisher.publishEvent()` | `kafkaTemplate.send()` | `outboxService.saveEvent()` |
 | JVM 내부 동기 이벤트 | Kafka 비동기 (트랜잭션 밖) | **트랜잭션 내부 Outbox 저장** |
-| 유실 없음 | DB 커밋 후 Kafka 실패 → 유실 | @Scheduled 릴레이가 Kafka 전송 |
+| 유실 없음 | DB 커밋 후 Kafka 실패 → 유실 | @Scheduled 릴레이가 **StreamBridge**로 전송 |
 
 ```java
 // Monolithic - 같은 JVM 내 동기 이벤트
@@ -29,7 +29,7 @@ public Order createOrder(...) {
     orderRepository.save(order);                              // 1. DB 저장
     outboxService.saveEvent("Order", order.getId().toString(), // 2. 같은 트랜잭션으로 Outbox 저장
         "OrderCreated", event);
-    // → @Scheduled OutboxRelay가 Kafka로 전송 (별도 트랜잭션)
+    // → @Scheduled OutboxRelay가 StreamBridge로 전송 (브로커 독립)
 }
 ```
 
@@ -39,8 +39,8 @@ public Order createOrder(...) {
 
 | Monolithic | MSA Basic | MSA Traffic |
 |-----------|-----------|-------------|
-| `@EventListener` | `@KafkaListener` | `@RetryableTopic` + `@DltHandler` |
-| 실패 시 예외 전파 | 실패 시 메시지 유실 | **4회 재시도 → DLT 이동** |
+| `@EventListener` | `@KafkaListener` | **함수형 Consumer** + `@Service` Handler |
+| 실패 시 예외 전파 | 실패 시 메시지 유실 | **4회 재시도 → DLQ 이동** |
 | - | 중복 처리 가능 | **ProcessedEvent로 멱등성 보장** |
 
 ```java
@@ -56,21 +56,25 @@ public void handlePaymentCompleted(PaymentCompletedEvent event) {
     // 처리 실패 → 메시지 유실, 중복 체크 없음
 }
 
-// MSA Traffic - 재시도 + DLQ + 멱등성
-@RetryableTopic(attempts = "4", backoff = @Backoff(delay = 1000, multiplier = 2.0))
-@KafkaListener(topics = "payment-events")
-public void handlePaymentCompleted(PaymentCompletedEvent event) {
-    if (processedEventRepository.existsById(event.eventId())) {
-        return;  // ★ 중복 이벤트 스킵
-    }
+// MSA Traffic - 함수형 Consumer + Handler + DLQ + 멱등성
+// @Configuration (Consumer 빈 등록)
+@Bean
+public Consumer<Message<String>> handlePaymentCompleted(PaymentEventHandler handler) {
+    return message -> {
+        PaymentCompletedEvent event = objectMapper.readValue(
+            message.getPayload(), PaymentCompletedEvent.class);
+        handler.handleCompleted(event);  // @Transactional 위임
+    };
+}
+
+// @Service (트랜잭션 처리)
+@Transactional
+public void handleCompleted(PaymentCompletedEvent event) {
+    if (processedEventRepository.existsById(event.eventId())) return; // ★ 멱등성
     // 처리 로직...
     processedEventRepository.save(new ProcessedEvent(event.eventId()));
 }
-
-@DltHandler  // ★ 4회 실패 후 Dead Letter Topic
-public void handleDlt(Object event) {
-    log.error("Manual intervention required: {}", event);
-}
+// ★ 4회 실패 후 → DLQ 토픽 (바인더 레벨 enableDlq: true)
 ```
 
 ---
@@ -195,7 +199,7 @@ public Order createOrder(...) {
 public Order createOrder(...) {
     var store = storeServiceClient.getStore(storeId);  // OpenFeign HTTP
     Order order = orderRepository.save(order);         // order_db만
-    eventPublisher.publishOrderCreated(event);         // kafkaTemplate.send()
+    kafkaTemplate.send("order-events", event);          // Kafka 직접 호출
     return order;  // Payment는 비동기 Kafka로 처리
 }
 ```
@@ -212,7 +216,7 @@ public Order createOrder(...) {
     Order order = orderRepository.save(order);         // order_db
     sagaStateRepository.save(sagaState);               // Saga 추적
     outboxService.saveEvent("Order", id, "OrderCreated", event); // 같은 TX
-    return order;  // Outbox Relay가 Kafka로 비동기 전송
+    return order;  // Outbox Relay가 StreamBridge로 비동기 전송 (브로커 독립)
 }
 ```
 
@@ -225,7 +229,7 @@ public Order createOrder(...) {
 | 단일 @Transactional | O | - | - |
 | Saga (Choreography) | - | O | O |
 | Transactional Outbox | - | - | O |
-| @RetryableTopic + DLQ | - | - | O |
+| Spring Cloud Stream + DLQ | - | - | O |
 | Idempotent Consumer | - | - | O |
 | Circuit Breaker | - | O | O |
 | Retry | - | - | O |
@@ -240,3 +244,6 @@ public Order createOrder(...) {
 | Prometheus 메트릭 | - | - | O |
 | API Gateway | - | - | O |
 | Idempotency-Key | - | - | O |
+| Spring Cloud Stream (브로커 추상화) | - | - | O |
+| Redis 주문 대기열 (Sorted Set) | - | - | O |
+| Redis Pub/Sub (실시간 알림) | - | - | O |
