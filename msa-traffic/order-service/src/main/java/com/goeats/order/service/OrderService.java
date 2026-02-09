@@ -200,6 +200,26 @@ public class OrderService {
     }
 
     /**
+     * 대기열에서 꺼낸 주문을 처리 (OrderQueueProcessor에서 호출).
+     *
+     * <p>이미 createOrder()에서 주문이 저장되고 Outbox 이벤트도 저장된 상태.
+     * 대기열에서 꺼낸 후에는 활성 주문 카운트만 관리하면 된다.</p>
+     *
+     * <p>Outbox Relay가 이미 이벤트를 브로커로 발행하므로,
+     * 여기서는 대기열 처리 완료 로그만 남긴다.</p>
+     *
+     * ★ Process queued order (called by OrderQueueProcessor)
+     *   Order + Outbox event already saved → just manage active count
+     */
+    @Transactional(readOnly = true)
+    public void processQueuedOrder(Long orderId) {
+        orderRepository.findById(orderId).ifPresent(order -> {
+            log.info("Queued order processing completed: orderId={}, status={}",
+                    orderId, order.getStatus());
+        });
+    }
+
+    /**
      * Circuit Breaker Fallback 메서드
      *
      * Store 서비스 호출이 Circuit Breaker에 의해 차단되었을 때 호출된다.
