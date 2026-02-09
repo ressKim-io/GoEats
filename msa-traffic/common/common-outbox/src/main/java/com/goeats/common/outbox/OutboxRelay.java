@@ -43,11 +43,15 @@ import java.util.List;
  *
  * <h3>바인딩 네이밍 규칙</h3>
  * <pre>
- *   eventType           → Binding Name
- *   "OrderCreated"      → "orderEvents-out-0"
- *   "PaymentCompleted"  → "paymentEvents-out-0"
- *   "PaymentFailed"     → "paymentFailedEvents-out-0"
- *   "DeliveryStatus"    → "deliveryEvents-out-0"
+ *   eventType              → Binding Name
+ *   "OrderCreated"         → "orderEvents-out-0"
+ *   "PaymentCompleted"     → "paymentEvents-out-0"
+ *   "PaymentFailed"        → "paymentFailedEvents-out-0"
+ *   "DeliveryStatus"       → "deliveryEvents-out-0"
+ *   "ProcessPayment"       → "paymentCommands-out-0"   (Orchestration)
+ *   "CompensatePayment"    → "paymentCommands-out-0"   (Orchestration)
+ *   "CreateDelivery"       → "deliveryCommands-out-0"  (Orchestration)
+ *   "SagaReply"            → "sagaReplies-out-0"       (Orchestration)
  * </pre>
  *
  * <h3>★ vs Monolithic</h3>
@@ -75,10 +79,14 @@ import java.util.List;
  *   3. Mark as published within a transaction
  *
  * Binding naming convention:
- *   - "OrderCreated"     → "orderEvents-out-0"
- *   - "PaymentCompleted" → "paymentEvents-out-0"
- *   - "PaymentFailed"    → "paymentFailedEvents-out-0"
- *   - "DeliveryStatus"   → "deliveryEvents-out-0"
+ *   - "OrderCreated"        → "orderEvents-out-0"
+ *   - "PaymentCompleted"    → "paymentEvents-out-0"
+ *   - "PaymentFailed"       → "paymentFailedEvents-out-0"
+ *   - "DeliveryStatus"      → "deliveryEvents-out-0"
+ *   - "ProcessPayment"      → "paymentCommands-out-0"   (Orchestration)
+ *   - "CompensatePayment"   → "paymentCommands-out-0"   (Orchestration)
+ *   - "CreateDelivery"      → "deliveryCommands-out-0"  (Orchestration)
+ *   - "SagaReply"           → "sagaReplies-out-0"       (Orchestration)
  *
  * ★ Broker independence: StreamBridge abstracts KafkaTemplate
  *   → Switch from Kafka to GCP Pub/Sub with ZERO code changes
@@ -144,14 +152,24 @@ public class OutboxRelay {
      *
      * ★ vs Before: resolveTopicName() → Kafka 토픽명 직접 지정
      *    vs After:  resolveBindingName() → 추상 바인딩명 (실제 토픽은 yml에서 매핑)
+     *
+     * ★ Orchestration Saga additions:
+     *    ProcessPayment, CompensatePayment → paymentCommands-out-0
+     *    CreateDelivery → deliveryCommands-out-0
+     *    SagaReply → sagaReplies-out-0
      */
     private String resolveBindingName(String eventType) {
         return switch (eventType) {
+            // --- Choreography events (legacy, retained for reference) ---
             case "OrderCreated" -> "orderEvents-out-0";
             case "PaymentCompleted" -> "paymentEvents-out-0";
             case "PaymentFailed" -> "paymentFailedEvents-out-0";
             case "DeliveryStatus" -> "deliveryEvents-out-0";
-            default -> "unknownEvents-out-0"; // 알 수 없는 이벤트 유형 (모니터링 필요)
+            // --- Orchestration Saga commands/replies ---
+            case "ProcessPayment", "CompensatePayment" -> "paymentCommands-out-0";
+            case "CreateDelivery" -> "deliveryCommands-out-0";
+            case "SagaReply" -> "sagaReplies-out-0";
+            default -> "unknownEvents-out-0"; // Unknown event type (needs monitoring)
         };
     }
 }
