@@ -22,7 +22,9 @@ GoEats/
 | Framework | Spring Boot 3.2.2 | + Spring Cloud | + Gateway |
 | DB | PostgreSQL 15 | + 서비스별 스키마 분리 | + 서비스별 스키마 분리 |
 | Cache | Caffeine (로컬) | Redis (분산) | + Cache Warming + Fallback |
-| Messaging | EventPublisher | Kafka | + Outbox + DLQ |
+| Messaging | EventPublisher | Kafka (직접) | + **Spring Cloud Stream** + Outbox + DLQ |
+| Queue | - | - | + **Redis Sorted Set** (주문 대기열) |
+| Realtime | - | - | + **Redis Pub/Sub** (상태 알림) |
 | Resilience | try-catch | Circuit Breaker | + Retry + Bulkhead + RateLimiter |
 | Lock | DB @Lock | Redisson | + Fencing Token |
 | Monitoring | - | - | Prometheus |

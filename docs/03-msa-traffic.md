@@ -1,6 +1,6 @@
 # MSA Traffic - 프로덕션급 패턴 상세
 
-MSA Basic의 한계를 해결하기 위해 **12가지 프로덕션 패턴**을 적용한 구조입니다.
+MSA Basic의 한계를 해결하기 위해 **15가지 프로덕션 패턴**을 적용한 구조입니다.
 각 패턴별로 **어떤 문제를 해결하는지**, **어떻게 동작하는지**, **주의점은 무엇인지** 설명합니다.
 
 ---
@@ -570,3 +570,99 @@ spring:
 | ShedLock | `msa-traffic/delivery-service/.../config/ShedLockConfig.java` |
 | SagaState | `msa-traffic/order-service/.../entity/SagaState.java` |
 | Prometheus 메트릭 | `msa-traffic/common/common-resilience/.../ResilienceMetricsConfig.java` |
+| Spring Cloud Stream | `msa-traffic/common/common-outbox/.../OutboxRelay.java` |
+| 함수형 Consumer (Payment) | `msa-traffic/payment-service/.../event/OrderEventListener.java` |
+| 함수형 Consumer (Order) | `msa-traffic/order-service/.../event/PaymentEventListener.java` |
+| 함수형 Consumer (Delivery) | `msa-traffic/delivery-service/.../event/PaymentEventListener.java` |
+| Redis 주문 대기열 | `msa-traffic/order-service/.../service/OrderQueueService.java` |
+| 대기열 프로세서 | `msa-traffic/order-service/.../scheduler/OrderQueueProcessor.java` |
+| Redis Pub/Sub 발행 | `msa-traffic/order-service/.../event/OrderStatusPublisher.java` |
+| Redis Pub/Sub 구독 | `msa-traffic/order-service/.../event/OrderStatusSubscriber.java` |
+| GCP Pub/Sub 프로필 | `msa-traffic/*/src/main/resources/application-gcp.yml` |
+
+---
+
+## 13. Spring Cloud Stream - 브로커 추상화
+
+### 문제
+Kafka를 직접 사용(`KafkaTemplate`, `@KafkaListener`)하면 브로커 교체 시 모든 코드를 수정해야 합니다.
+클라우드 배포 시 Kafka 클러스터 운영 비용이 매월 $200+ 발생합니다.
+
+### 해결
+Spring Cloud Stream으로 메시징을 추상화하여, **코드 변경 0줄**로 브로커를 교체합니다.
+
+```java
+// Before: Kafka 직접 의존
+KafkaTemplate<String, String> kafkaTemplate;
+kafkaTemplate.send(topic, key, payload);
+
+// After: StreamBridge 추상화
+StreamBridge streamBridge;
+streamBridge.send(bindingName, message);
+// application.yml의 binder만 변경하면 Kafka → GCP Pub/Sub 전환 완료
+```
+
+### 비용 비교
+
+| 브로커 | 월 비용 | 특징 |
+|--------|---------|------|
+| Kafka (AWS MSK) | ~$200+ | 2개 브로커 최소, 상시 운영 |
+| GCP Pub/Sub | ~$3-10 | 메시지당 과금, 서버리스 |
+| Redis Queue | $0 | 이미 Redis 사용 중 |
+
+---
+
+## 14. Redis 주문 대기열 (Sorted Set)
+
+### 문제
+피크타임(점심/저녁)에 주문이 폭주하면 시스템 과부하가 발생합니다.
+
+### 해결
+Redis Sorted Set으로 주문을 대기열에 넣고 순서대로 처리합니다 (티켓팅 대기열 패턴).
+
+```java
+// 대기열 추가: ZADD order:queue {timestamp} {orderId}
+void enqueue(Long orderId);
+
+// 대기열에서 꺼내기: ZPOPMIN order:queue
+Long dequeue();
+
+// 현재 순번 조회: ZRANK order:queue {orderId} → O(log N)
+long getPosition(Long orderId);
+```
+
+### 3단계 트래픽 제어
+
+```
+1단계: Gateway Rate Limiting (Redis Token Bucket) → 전체 요청 속도 제한
+2단계: @RateLimiter (Resilience4j) → 서비스 레벨 요청 속도 제한
+3단계: Redis Queue (Sorted Set) → 피크타임 주문 대기열
+```
+
+---
+
+## 15. Redis Pub/Sub - 실시간 알림
+
+### 문제
+주문 상태가 변경될 때 클라이언트에게 즉시 알려줄 방법이 없습니다.
+
+### 해결
+Redis Pub/Sub로 상태 변경을 실시간 브로드캐스트합니다.
+
+```java
+// Publisher
+redisTemplate.convertAndSend("order:status", message);
+
+// Subscriber (MessageListener)
+public void onMessage(Message message, byte[] pattern) {
+    // WebSocket/SSE로 클라이언트에게 전달
+}
+```
+
+### 메시징 3종 비교
+
+| 패턴 | 도구 | 영속성 | 용도 |
+|------|------|--------|------|
+| Saga 이벤트 | Kafka (Spring Cloud Stream) | O (로그 기반) | 서비스 간 신뢰성 높은 비동기 통신 |
+| 주문 대기열 | Redis Sorted Set | O (소비까지) | 피크타임 주문 폭주 관리 |
+| 실시간 알림 | Redis Pub/Sub | X (fire-and-forget) | 주문 상태 변경 즉시 알림 |
