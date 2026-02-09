@@ -484,33 +484,112 @@ public class ShedLockConfig {
 
 ---
 
-## 11. Saga State 추적
+## 11. Orchestration Saga (Command/Reply)
 
 ### 문제
-비동기 Saga에서 현재 어느 단계에 있는지, 실패 원인이 무엇인지 추적할 수 없습니다.
+Choreography Saga에서는 각 서비스가 이벤트를 독립적으로 구독/발행하여 전체 흐름을 한 곳에서 파악할 수 없습니다.
+보상 로직이 각 서비스에 분산되어 있어 디버깅과 유지보수가 어렵습니다.
 
 ### 해결
-`SagaState` 엔티티로 Saga의 생명주기를 관리합니다.
+**Orchestrator** (Order Service)가 Command/Reply 패턴으로 Saga의 전체 흐름을 중앙 제어합니다.
+
+```
+Order Orchestrator
+  ├─ 1. PaymentCommand(PROCESS) → Payment Service
+  │     └─ SagaReply(PAYMENT, success) → Orchestrator
+  ├─ 2. DeliveryCommand → Delivery Service
+  │     └─ SagaReply(DELIVERY, success) → Orchestrator
+  └─ 완료 or 보상 (PaymentCommand(COMPENSATE))
+```
+
+### 핵심 컴포넌트
 
 ```java
-// msa-traffic/order-service/.../entity/SagaState.java
+// Command DTO (common-dto)
+public record PaymentCommand(String eventId, String sagaId, Long orderId,
+                             CommandType commandType, BigDecimal amount, ...) {
+    public enum CommandType { PROCESS, COMPENSATE }
+}
+
+// Unified Reply DTO (common-dto)
+public record SagaReply(String eventId, String sagaId, Long orderId,
+                        StepName stepName, boolean success, ...) {
+    public enum StepName { PAYMENT, DELIVERY, PAYMENT_COMPENSATE }
+}
+```
+
+```java
+// Orchestrator (order-service)
+@Service
+public class OrderSagaOrchestrator {
+    public void startSaga(String sagaId, Order order) {
+        // PaymentCommand(PROCESS) → Outbox
+        outboxService.saveEvent("Order", orderId, "ProcessPayment", command);
+    }
+    public void handlePaymentResult(String sagaId, ...) {
+        // Success → DeliveryCommand → Outbox
+        // Failure → Saga FAILED
+    }
+    public void handleDeliveryResult(String sagaId, ...) {
+        // Success → Saga COMPLETED
+        // Failure → PaymentCommand(COMPENSATE) → Outbox
+    }
+}
+```
+
+### SagaState - 타입 안전 상태 머신
+
+```java
+// SagaStep enum with transition validation
+public enum SagaStep {
+    PAYMENT_PENDING,        // PaymentCommand(PROCESS) 발행
+    PAYMENT_COMPLETED,      // Payment 성공 Reply 수신
+    DELIVERY_PENDING,       // DeliveryCommand 발행
+    COMPENSATING_PAYMENT,   // Payment 보상(환불) 진행
+    COMPLETED,              // 모든 단계 성공
+    FAILED                  // 최종 실패
+}
+
+// SagaState.java - Orchestration 중앙 상태 관리
 @Entity
 public class SagaState {
-    private String sagaId;           // UUID
-    private String sagaType;         // "CREATE_ORDER"
+    @Enumerated(EnumType.STRING)
+    private SagaStep currentStep;    // ★ String → enum (전이 검증)
     @Enumerated(EnumType.STRING)
     private SagaStatus status;       // STARTED → COMPENSATING → COMPLETED / FAILED
-    private String currentStep;      // "ORDER_CREATED", "PAYMENT_PENDING", etc.
-    private String failureReason;
-    private Long orderId;
+
+    public void transitionTo(SagaStep next) {
+        if (!currentStep.canTransitionTo(next))
+            throw new IllegalStateException("Invalid transition");
+        this.currentStep = next;
+    }
 }
 ```
 
 ### 상태 전이
 ```
-STARTED → (결제 성공) → COMPLETED
-        → (결제 실패) → COMPENSATING → FAILED
+정상: PAYMENT_PENDING → PAYMENT_COMPLETED → DELIVERY_PENDING → COMPLETED
+결제 실패: PAYMENT_PENDING → FAILED
+배달 실패: DELIVERY_PENDING → COMPENSATING_PAYMENT → FAILED
 ```
+
+### 토픽 구조
+| 토픽 | Producer | Consumer |
+|------|----------|----------|
+| payment-commands | Order Orchestrator | Payment Service |
+| delivery-commands | Order Orchestrator | Delivery Service |
+| saga-replies | Payment, Delivery | Order Orchestrator |
+
+### ★ vs Choreography (MSA Basic)
+
+| 항목 | Choreography | Orchestration |
+|------|-------------|---------------|
+| 흐름 제어 | 각 서비스가 독립적으로 판단 | Orchestrator가 중앙 제어 |
+| 토픽 구조 | Event 토픽 다수 (order-events, payment-events, ...) | Command/Reply 토픽 3개 |
+| 보상 로직 | 각 서비스에 분산 | Orchestrator에 집중 |
+| 결합도 | 느슨 (서비스 간 직접 의존 없음) | Orchestrator에 의존 |
+| 디버깅 | 전체 흐름 파악 어려움 | Orchestrator 로그로 전체 흐름 추적 |
+| SagaState | 관찰 전용 (String) | 의사결정 기반 (enum + 전이 검증) |
 
 ---
 
@@ -581,8 +660,11 @@ spring.cloud.stream:
 | Outbox 엔티티 | `msa-traffic/common/common-outbox/.../OutboxEvent.java` |
 | Outbox 저장 | `msa-traffic/common/common-outbox/.../OutboxService.java` |
 | Outbox 릴레이 | `msa-traffic/common/common-outbox/.../OutboxRelay.java` |
-| 함수형 Consumer + Handler (Payment) | `msa-traffic/payment-service/.../event/OrderEventListener.java` + `OrderEventHandler.java` |
-| 함수형 Consumer + Handler (Order) | `msa-traffic/order-service/.../event/PaymentEventListener.java` + `PaymentEventHandler.java` |
+| Orchestrator | `msa-traffic/order-service/.../saga/OrderSagaOrchestrator.java` |
+| Saga Reply Handler (Order) | `msa-traffic/order-service/.../saga/SagaReplyListener.java` + `SagaReplyHandler.java` |
+| Payment Command Handler | `msa-traffic/payment-service/.../command/PaymentCommandListener.java` + `PaymentCommandHandler.java` |
+| Delivery Command Handler | `msa-traffic/delivery-service/.../command/DeliveryCommandListener.java` + `DeliveryCommandHandler.java` |
+| Command/Reply DTOs | `msa-traffic/common/common-dto/.../command/PaymentCommand.java`, `DeliveryCommand.java`, `SagaReply.java` |
 | ProcessedEvent | `msa-traffic/*/event/ProcessedEvent.java` |
 | Fencing Token | `msa-traffic/delivery-service/.../service/DeliveryService.java` |
 | Fencing Update | `msa-traffic/delivery-service/.../repository/DeliveryRepository.java` |
@@ -599,9 +681,7 @@ spring.cloud.stream:
 | SagaState | `msa-traffic/order-service/.../entity/SagaState.java` |
 | Prometheus 메트릭 | `msa-traffic/common/common-resilience/.../ResilienceMetricsConfig.java` |
 | Spring Cloud Stream | `msa-traffic/common/common-outbox/.../OutboxRelay.java` |
-| 함수형 Consumer (Payment) | `msa-traffic/payment-service/.../event/OrderEventListener.java` |
-| 함수형 Consumer (Order) | `msa-traffic/order-service/.../event/PaymentEventListener.java` |
-| 함수형 Consumer (Delivery) | `msa-traffic/delivery-service/.../event/PaymentEventListener.java` |
+| SagaStep enum | `msa-traffic/order-service/.../entity/SagaStep.java` |
 | Redis 주문 대기열 | `msa-traffic/order-service/.../service/OrderQueueService.java` |
 | 대기열 프로세서 | `msa-traffic/order-service/.../scheduler/OrderQueueProcessor.java` |
 | Redis Pub/Sub 발행 | `msa-traffic/order-service/.../event/OrderStatusPublisher.java` |

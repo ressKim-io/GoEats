@@ -175,6 +175,38 @@ private Store getStoreFallback(Long id, Throwable t) {
 
 ---
 
+## Saga 패턴
+
+| 항목 | Monolithic | MSA Basic | MSA Traffic |
+|------|-----------|-----------|-------------|
+| 트랜잭션 | `@Transactional` (단일 DB) | **Choreography** Saga (이벤트 기반) | **Orchestration** Saga (Command/Reply) |
+| 흐름 제어 | 단일 메서드 내 순차 호출 | 각 서비스가 독립적으로 이벤트 구독 | Orchestrator가 중앙 제어 |
+| 보상 트랜잭션 | 자동 롤백 | 각 서비스에 보상 로직 분산 | Orchestrator가 보상 결정 |
+| 상태 추적 | 불필요 | SagaState (관찰 전용, String) | SagaState (의사결정 기반, SagaStep enum) |
+| 디버깅 | 단일 트랜잭션 로그 | 전체 흐름 파악 어려움 | Orchestrator 로그로 전체 흐름 추적 |
+
+```java
+// Monolithic - 단일 @Transactional
+@Transactional
+public Order createOrder(...) {
+    orderRepository.save(order);
+    paymentService.processPayment(order);  // 실패 → 전체 롤백
+    deliveryService.createDelivery(order);
+}
+
+// MSA Basic - Choreography Saga
+// Order → OrderCreatedEvent → Payment (독립 구독)
+//                              → PaymentCompletedEvent → Delivery (독립 구독)
+kafkaTemplate.send("order-events", event);  // 각 서비스가 스스로 판단
+
+// MSA Traffic - Orchestration Saga
+// Orchestrator → PaymentCommand → Payment → SagaReply → Orchestrator
+//             → DeliveryCommand → Delivery → SagaReply → Orchestrator
+sagaOrchestrator.startSaga(sagaId, order);  // 중앙 제어자가 순차 지시
+```
+
+---
+
 ## 주문 생성 전체 비교
 
 ### Monolithic
@@ -204,7 +236,7 @@ public Order createOrder(...) {
 }
 ```
 
-### MSA Traffic
+### MSA Traffic (Orchestration Saga)
 
 ```java
 @Transactional
@@ -214,10 +246,12 @@ public Order createOrder(...) {
 public Order createOrder(...) {
     var store = storeServiceClient.getStore(storeId);  // Feign + Retry + CB
     Order order = orderRepository.save(order);         // order_db
-    sagaStateRepository.save(sagaState);               // Saga 추적
-    outboxService.saveEvent("Order", id, "OrderCreated", event); // 같은 TX
-    return order;  // Outbox Relay가 StreamBridge로 비동기 전송 (브로커 독립)
+    sagaStateRepository.save(sagaState);               // Saga 추적 (SagaStep enum)
+    sagaOrchestrator.startSaga(sagaId, order);         // ★ Orchestrator가 PaymentCommand 발행
+    return order;  // Outbox Relay → payment-commands → Payment Service
 }
+// Payment Service가 SagaReply → saga-replies → Orchestrator
+// Orchestrator가 DeliveryCommand → delivery-commands → Delivery Service
 ```
 
 ---
@@ -227,7 +261,8 @@ public Order createOrder(...) {
 | 패턴 | Monolithic | MSA Basic | MSA Traffic |
 |------|:---------:|:---------:|:-----------:|
 | 단일 @Transactional | O | - | - |
-| Saga (Choreography) | - | O | O |
+| Saga (Choreography) | - | O | - |
+| Saga (Orchestration) | - | - | O |
 | Transactional Outbox | - | - | O |
 | Spring Cloud Stream + DLQ | - | - | O |
 | Idempotent Consumer | - | - | O |
