@@ -28,24 +28,18 @@
 spring:
   cloud:
     function:
-      definition: handlePaymentCompleted;handlePaymentFailed
+      definition: handleSagaReply
     stream:
       default-binder: pubsub
       bindings:
-        # --- Producer bindings ---
-        orderEvents-out-0:
-          destination: order-events
-        # --- Consumer bindings ---
-        handlePaymentCompleted-in-0:
-          destination: payment-events
-          group: order-service
-          consumer:
-            max-attempts: 4
-            back-off-initial-interval: 1000
-            back-off-multiplier: 2.0
-            back-off-max-interval: 10000
-        handlePaymentFailed-in-0:
-          destination: payment-failed-events
+        # --- Producer bindings (Orchestration commands) ---
+        paymentCommands-out-0:
+          destination: payment-commands
+        deliveryCommands-out-0:
+          destination: delivery-commands
+        # --- Consumer bindings (Orchestration replies) ---
+        handleSagaReply-in-0:
+          destination: saga-replies
           group: order-service
           consumer:
             max-attempts: 4

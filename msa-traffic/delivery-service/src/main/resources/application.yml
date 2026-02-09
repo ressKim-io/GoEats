@@ -42,16 +42,17 @@ spring:
   # ★ Spring Cloud Stream: broker-abstracted messaging
   cloud:
     function:
-      definition: handlePaymentCompletedForDelivery
+      # ★ Orchestration: receives delivery commands from Orchestrator
+      definition: handleDeliveryCommand
     stream:
       # ★ Binding → Topic mapping
       bindings:
-        # --- Producer bindings (OutboxRelay uses StreamBridge) ---
-        deliveryEvents-out-0:
-          destination: delivery-events
-        # --- Consumer bindings ---
-        handlePaymentCompletedForDelivery-in-0:
-          destination: payment-events
+        # --- Producer bindings (OutboxRelay uses StreamBridge for SagaReply) ---
+        sagaReplies-out-0:
+          destination: saga-replies
+        # --- Consumer bindings (Orchestration: delivery commands) ---
+        handleDeliveryCommand-in-0:
+          destination: delivery-commands
           group: delivery-service
           consumer:
             max-attempts: 4
@@ -67,12 +68,12 @@ spring:
             retries: 3
             enable.idempotence: true
           consumer-properties:
-            spring.json.trusted.packages: com.goeats.common.event
+            spring.json.trusted.packages: com.goeats.common.event,com.goeats.common.command
         bindings:
-          handlePaymentCompletedForDelivery-in-0:
+          handleDeliveryCommand-in-0:
             consumer:
               enable-dlq: true
-              dlq-name: payment-events.delivery-service.dlq
+              dlq-name: delivery-commands.delivery-service.dlq
 
 # ★ Resilience4j - Bulkhead-centric configuration
 resilience4j:

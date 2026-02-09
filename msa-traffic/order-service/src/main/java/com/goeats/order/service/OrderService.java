@@ -1,14 +1,13 @@
 package com.goeats.order.service;
 
-import com.goeats.common.event.OrderCreatedEvent;
 import com.goeats.common.exception.BusinessException;
 import com.goeats.common.exception.ErrorCode;
-import com.goeats.common.outbox.OutboxService;
 import com.goeats.order.client.StoreServiceClient;
 import com.goeats.order.entity.*;
 import com.goeats.order.event.OrderStatusPublisher;
 import com.goeats.order.repository.OrderRepository;
 import com.goeats.order.repository.SagaStateRepository;
+import com.goeats.order.saga.OrderSagaOrchestrator;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
@@ -27,7 +26,7 @@ import java.util.UUID;
  * 주문 생성/조회/취소를 처리하며, 분산 트랜잭션(Saga)의 시작점 역할을 한다.
  * Transactional Outbox 패턴으로 이벤트 발행의 원자성을 보장한다.
  *
- * <h3>MSA Basic에서 달라진 점 3가지</h3>
+ * <h3>MSA Basic에서 달라진 점 4가지</h3>
  * <ol>
  *   <li><b>이벤트 발행:</b> kafkaTemplate.send() → outboxService.saveEvent()
  *       <br>MSA Basic: 주문 저장(DB) + Kafka 발행이 별도 → Kafka 실패 시 이벤트 유실
@@ -38,6 +37,9 @@ import java.util.UUID;
  *   <li><b>Saga 추적:</b> 없음 → SagaState 생명주기 관리
  *       <br>MSA Basic: Saga 상태를 기록하지 않아 장애 디버깅 불가
  *       <br>MSA-Traffic: DB에 Saga 상태를 기록하여 어디서 실패했는지 추적</li>
+ *   <li><b>Saga 패턴:</b> Choreography → Orchestration
+ *       <br>MSA Basic: 각 서비스가 이벤트를 독립적으로 구독/발행 (중앙 제어 없음)
+ *       <br>MSA-Traffic: Orchestrator가 Command/Reply로 순차 제어 (중앙 제어)</li>
  * </ol>
  *
  * <h3>Resilience4j 어노테이션 실행 순서 (바깥 → 안쪽)</h3>
@@ -75,8 +77,8 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final SagaStateRepository sagaStateRepository;
-    private final StoreServiceClient storeServiceClient;   // OpenFeign: Store 서비스 HTTP 클라이언트
-    private final OutboxService outboxService;             // Transactional Outbox: 이벤트 저장
+    private final StoreServiceClient storeServiceClient;     // OpenFeign: Store 서비스 HTTP 클라이언트
+    private final OrderSagaOrchestrator sagaOrchestrator;    // ★ Orchestration Saga: 중앙 제어자
     private final OrderStatusPublisher orderStatusPublisher; // ★ Redis Pub/Sub: 실시간 상태 알림
 
     /**
@@ -90,7 +92,7 @@ public class OrderService {
      * 1. Store 서비스에 가게/메뉴 정보 조회 (OpenFeign, @Retry+@CB+@Bulkhead로 보호)
      * 2. Order 엔티티 생성 + OrderItem 추가
      * 3. SagaState 생성 (분산 트랜잭션 추적 시작)
-     * 4. Outbox 이벤트 저장 (같은 트랜잭션에서 원자적으로 저장)
+     * 4. ★ Orchestrator.startSaga() → PaymentCommand를 Outbox에 저장
      * 5. [트랜잭션 커밋] → DB에 주문 + SagaState + Outbox 레코드 동시 저장
      * 6. [비동기] Outbox Relay(@Scheduled)가 outbox 테이블을 폴링 → Kafka로 발행
      * </pre>
@@ -146,28 +148,15 @@ public class OrderService {
                 .build();
         sagaStateRepository.save(sagaState);
 
-        // 4. ★ Transactional Outbox: save event in SAME transaction as order
-        //    (vs Basic MSA: kafkaTemplate.send() which can fail after commit)
-        // 4단계: Transactional Outbox로 이벤트 저장
-        // ★ 핵심: outboxService.saveEvent()는 DB에 저장만 함 (Kafka로 직접 보내지 않음)
-        //   → 주문 + 이벤트가 같은 트랜잭션에서 커밋되므로 원자성 보장
-        //   → Outbox Relay(@Scheduled)가 나중에 DB를 폴링하여 Kafka로 발행
-        List<OrderCreatedEvent.OrderItemDto> itemDtos = order.getItems().stream()
-                .map(item -> new OrderCreatedEvent.OrderItemDto(
-                        item.getMenuId(), item.getQuantity(), item.getPrice()))
-                .toList();
-
-        OrderCreatedEvent event = new OrderCreatedEvent(
-                order.getId(), userId, storeId, itemDtos,
-                order.getTotalAmount(), deliveryAddress, paymentMethod);
-
-        outboxService.saveEvent("Order", order.getId().toString(),
-                "OrderCreated", event);
+        // 4. ★ Orchestration Saga: Orchestrator starts saga with PaymentCommand
+        //    (vs Choreography: outboxService.saveEvent("OrderCreated", event))
+        //    Orchestrator → PaymentCommand(PROCESS) → Outbox → Kafka → Payment Service
+        sagaOrchestrator.startSaga(sagaId, order);
 
         // 5. ★ Redis Pub/Sub: 실시간 주문 상태 알림 발행
         orderStatusPublisher.publish(order.getId(), OrderStatus.PAYMENT_PENDING.name());
 
-        log.info("Order created with Outbox event: orderId={}, sagaId={}", order.getId(), sagaId);
+        log.info("Order created, saga started: orderId={}, sagaId={}", order.getId(), sagaId);
         return order;
     }
 

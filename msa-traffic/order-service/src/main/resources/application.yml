@@ -41,25 +41,19 @@ spring:
   # ★ Spring Cloud Stream: broker-abstracted messaging
   cloud:
     function:
-      # Register consumer beans (comma-separated for multiple)
-      definition: handlePaymentCompleted;handlePaymentFailed
+      # ★ Orchestration: single consumer for all saga replies
+      definition: handleSagaReply
     stream:
       # ★ Binding → Topic mapping
       bindings:
         # --- Producer bindings (OutboxRelay uses StreamBridge) ---
-        orderEvents-out-0:
-          destination: order-events
-        # --- Consumer bindings ---
-        handlePaymentCompleted-in-0:
-          destination: payment-events
-          group: order-service
-          consumer:
-            max-attempts: 4
-            back-off-initial-interval: 1000
-            back-off-multiplier: 2.0
-            back-off-max-interval: 10000
-        handlePaymentFailed-in-0:
-          destination: payment-failed-events
+        paymentCommands-out-0:
+          destination: payment-commands
+        deliveryCommands-out-0:
+          destination: delivery-commands
+        # --- Consumer bindings (Orchestration: saga replies) ---
+        handleSagaReply-in-0:
+          destination: saga-replies
           group: order-service
           consumer:
             max-attempts: 4
@@ -75,16 +69,12 @@ spring:
             retries: 3
             enable.idempotence: true
           consumer-properties:
-            spring.json.trusted.packages: com.goeats.common.event
+            spring.json.trusted.packages: com.goeats.common.event,com.goeats.common.command
         bindings:
-          handlePaymentCompleted-in-0:
+          handleSagaReply-in-0:
             consumer:
               enable-dlq: true
-              dlq-name: payment-events.order-service.dlq
-          handlePaymentFailed-in-0:
-            consumer:
-              enable-dlq: true
-              dlq-name: payment-failed-events.order-service.dlq
+              dlq-name: saga-replies.order-service.dlq
 
 # ★★★ Resilience4j 5-pattern configuration
 resilience4j:

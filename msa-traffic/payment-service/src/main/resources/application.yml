@@ -42,18 +42,17 @@ spring:
   # ★ Spring Cloud Stream: broker-abstracted messaging
   cloud:
     function:
-      definition: handleOrderCreated
+      # ★ Orchestration: receives payment commands from Orchestrator
+      definition: handlePaymentCommand
     stream:
       # ★ Binding → Topic mapping
       bindings:
-        # --- Producer bindings (OutboxRelay uses StreamBridge) ---
-        paymentEvents-out-0:
-          destination: payment-events
-        paymentFailedEvents-out-0:
-          destination: payment-failed-events
-        # --- Consumer bindings ---
-        handleOrderCreated-in-0:
-          destination: order-events
+        # --- Producer bindings (OutboxRelay uses StreamBridge for SagaReply) ---
+        sagaReplies-out-0:
+          destination: saga-replies
+        # --- Consumer bindings (Orchestration: payment commands) ---
+        handlePaymentCommand-in-0:
+          destination: payment-commands
           group: payment-service
           consumer:
             max-attempts: 4
@@ -69,12 +68,12 @@ spring:
             retries: 3
             enable.idempotence: true
           consumer-properties:
-            spring.json.trusted.packages: com.goeats.common.event
+            spring.json.trusted.packages: com.goeats.common.event,com.goeats.common.command
         bindings:
-          handleOrderCreated-in-0:
+          handlePaymentCommand-in-0:
             consumer:
               enable-dlq: true
-              dlq-name: order-events.payment-service.dlq
+              dlq-name: payment-commands.payment-service.dlq
 
 # ★ Resilience4j configuration
 resilience4j:

@@ -26,16 +26,16 @@
 spring:
   cloud:
     function:
-      definition: handlePaymentCompletedForDelivery
+      definition: handleDeliveryCommand
     stream:
       default-binder: pubsub
       bindings:
-        # --- Producer bindings ---
-        deliveryEvents-out-0:
-          destination: delivery-events
-        # --- Consumer bindings ---
-        handlePaymentCompletedForDelivery-in-0:
-          destination: payment-events
+        # --- Producer bindings (SagaReply) ---
+        sagaReplies-out-0:
+          destination: saga-replies
+        # --- Consumer bindings (Orchestration commands) ---
+        handleDeliveryCommand-in-0:
+          destination: delivery-commands
           group: delivery-service
           consumer:
             max-attempts: 4
