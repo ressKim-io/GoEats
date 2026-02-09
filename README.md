@@ -38,7 +38,7 @@ GoEats/
 | [아키텍처 진화 개요](docs/00-architecture-overview.md) | 3단계 진화 흐름, 각 단계의 해결/발생 문제 |
 | [Monolithic 상세](docs/01-monolithic.md) | @Transactional, Caffeine, DB Lock 패턴 |
 | [MSA Basic 상세](docs/02-msa-basic.md) | Saga, OpenFeign, Circuit Breaker, 한계점 |
-| [MSA Traffic 상세](docs/03-msa-traffic.md) | 12가지 프로덕션 패턴, 기술, 주의점 |
+| [MSA Traffic 상세](docs/03-msa-traffic.md) | 15가지 프로덕션 패턴, 기술, 주의점 |
 | [3-Way 코드 비교](docs/04-pattern-comparison.md) | 패턴별 코드 스니펫 비교 |
 | [트래픽 시나리오](docs/05-traffic-scenarios.md) | 주문 폭주, 장애, 이중 결제 등 대응 전략 |
 | [빌드/실행 가이드](docs/06-setup-guide.md) | Docker 빌드, 인프라 설정 |

@@ -17,8 +17,10 @@ GoEats 프로젝트는 동일한 배달 서비스 도메인을 **3가지 아키�
   Caffeine                 Redis Cache                + Cache Warming + 다단계 Fallback
   DB Lock                  Redisson Lock              + Fencing Token + ShedLock
   -                        kafkaTemplate.send()       + Transactional Outbox
-  -                        @KafkaListener             + @RetryableTopic + DLQ
+  -                        @KafkaListener             + Spring Cloud Stream + DLQ
   -                        -                          + API Gateway + Rate Limiting
+  -                        -                          + Redis 주문 대기열 (Sorted Set)
+  -                        -                          + Redis Pub/Sub (실시간 알림)
   -                        -                          + Prometheus 모니터링
 ```
 
@@ -44,11 +46,14 @@ GoEats 프로젝트는 동일한 배달 서비스 도메인을 **3가지 아키�
 
 **해결한 문제:**
 - `kafkaTemplate.send()` 실패 시 이벤트 유실 → **Transactional Outbox**로 원자성 보장
-- Kafka 메시지 처리 실패 시 유실 → **@RetryableTopic + DLQ**로 재시도 및 Dead Letter 처리
+- Kafka 메시지 처리 실패 시 유실 → **Spring Cloud Stream + DLQ**로 재시도 및 Dead Letter 처리
+- 브로커 교체 시 코드 수정 필수 → **Spring Cloud Stream** 추상화 (코드 변경 0줄로 브로커 교체)
 - 중복 이벤트 처리 → **Idempotent Consumer** (ProcessedEvent + eventId)
 - 과부하 시 연쇄 장애 → **Bulkhead + RateLimiter**로 격리
+- 피크타임 주문 폭주 → **Redis Sorted Set 주문 대기열**로 순차 처리
 - 분산 락 만료 후 stale write → **Fencing Token**으로 방지
 - 콜드 스타트 시 캐시 미스 → **Cache Warming**으로 프리로드
+- 주문 상태 변경 시 실시간 알림 불가 → **Redis Pub/Sub**로 즉시 브로드캐스트
 - Saga 진행 상태 추적 불가 → **SagaState** 엔티티로 상태 머신 관리
 - 다중 인스턴스 스케줄러 중복 실행 → **ShedLock**으로 방지
 - 운영 가시성 부재 → **Prometheus + Actuator** 메트릭
@@ -57,6 +62,7 @@ GoEats 프로젝트는 동일한 배달 서비스 도메인을 **3가지 아키�
 - Outbox 폴링 지연 (최대 1초)
 - DLQ 메시지 수동 처리 프로세스 필요
 - 멱등성 키 관리 오버헤드
+- Redis Pub/Sub은 fire-and-forget (구독자 없으면 메시지 유실)
 - 인프라 복잡성 증가 (Redis, Kafka, Prometheus)
 
 ---
@@ -68,7 +74,9 @@ GoEats 프로젝트는 동일한 배달 서비스 도메인을 **3가지 아키�
 | Framework | Spring Boot 3.2.2 | + Spring Cloud 2023.0.0 | + Spring Cloud Gateway |
 | Database | H2 (단일 DB) | H2 (서비스별 독립 DB) | + HikariCP 튜닝 |
 | Cache | Caffeine (로컬) | Redis (분산) | + Cache Warming + 다단계 Fallback |
-| Messaging | ApplicationEventPublisher | Apache Kafka | + Transactional Outbox + DLQ |
+| Messaging | ApplicationEventPublisher | Apache Kafka | + **Spring Cloud Stream** + Outbox + DLQ |
+| Queue | - | - | + **Redis Sorted Set** (주문 대기열) |
+| Realtime | - | - | + **Redis Pub/Sub** (상태 알림) |
 | Communication | 직접 메서드 호출 | OpenFeign (HTTP) | + 계단식 타임아웃 |
 | Resilience | try-catch | Circuit Breaker | + Retry + Bulkhead + RateLimiter + TimeLimiter |
 | Lock | JPA @Lock (DB) | Redisson (분산 락) | + Fencing Token |
@@ -139,7 +147,7 @@ Client ── POST /api/orders ──> Gateway (:8080)
     │   ┌─── Kafka: order-events ─────────────────────┐
     │   ▼                                              │
     │  payment-service (:8083)                         │
-    │  │ @RetryableTopic (4회 재시도)                     │
+    │  │ Spring Cloud Stream (4회 재시도)                  │
     │  │ ProcessedEvent 중복 체크                         │
     │  │ Outbox로 결과 이벤트 발행                         │
     │  ├─ 성공 → Kafka: payment-events                  │
@@ -152,7 +160,7 @@ Client ── POST /api/orders ──> Gateway (:8080)
     │   │ Saga 완료      │  │ @Bulkhead    │
     │   └──────────────┘  └──────────────┘
     │
-    └── 실패 시: @DltHandler → Dead Letter Topic → 수동 처리
+    └── 실패 시: DLQ (바인더 레벨) → Dead Letter Topic → 수동 처리
 ```
 
 ---

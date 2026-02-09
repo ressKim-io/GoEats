@@ -14,6 +14,7 @@
 | 병목 | 단일 DB 커넥션 풀 | 서비스별 독립 DB | + HikariCP 튜닝 |
 | 과부하 보호 | - | - | **RateLimiter (50/s)** |
 | 스레드 격리 | - | - | **Bulkhead (20 concurrent)** |
+| 주문 대기열 | - | - | **Redis Sorted Set** |
 
 ### Monolithic 대응
 - 서버 전체를 복제해야 함 (불필요한 리소스 낭비)
@@ -31,12 +32,17 @@ Client → Gateway (Redis Rate Limit: 50/s 초과 → 429)
            ↓
   order-service (Bulkhead: 20개 초과 → 503)
            ↓                           ↓
-  성공 → Outbox 저장            실패 → 빠른 거부
+  Redis Queue 활성?             실패 → 빠른 거부
+    Yes → 대기열에 추가 (Sorted Set)
+    No  → 즉시 처리 → Outbox 저장
            ↓
-  OutboxRelay → Kafka → payment-service
+  OrderQueueProcessor (0.5초 간격) → 순차 처리
+           ↓
+  OutboxRelay → StreamBridge → Kafka → payment-service
 ```
-- Gateway에서 사용자별 Rate Limiting으로 과부하 차단
-- Bulkhead로 동시 처리량 제한하여 서비스 보호
+- **3단계 트래픽 제어**: Gateway Rate Limit → Bulkhead → Redis Queue
+- 대기열 활성 시 주문을 Redis Sorted Set에 넣고 순서대로 처리
+- 대기 순번 조회 API(`GET /api/orders/queue/status`)로 사용자 안내
 - 거부된 요청은 클라이언트가 재시도 (429 응답)
 
 ---
@@ -48,7 +54,7 @@ payment-service가 30초간 응답 불가한 상황.
 | | Monolithic | MSA Basic | MSA Traffic |
 |---|-----------|-----------|-------------|
 | 주문 접수 | **전체 실패** | 접수 가능, 결제 지연 | 접수 가능, 결제 지연 |
-| 이벤트 보존 | - | Kafka offset 보존 | **+ Outbox + DLQ** |
+| 이벤트 보존 | - | Kafka offset 보존 | **+ Outbox + 바인더 DLQ** |
 | 중복 처리 | - | 가능성 있음 | **멱등성 보장** |
 | 장애 감지 | 로그 확인 | 로그 확인 | **Prometheus 메트릭** |
 
@@ -65,19 +71,19 @@ payment-service가 30초간 응답 불가한 상황.
 ```
 주문 → Order 저장 + Outbox 저장 (같은 TX)
          ↓
-OutboxRelay → Kafka: order-events
+OutboxRelay → StreamBridge → Kafka: order-events
          ↓
 payment-service (다운)
          ↓
-@RetryableTopic: 1s → 2s → 4s → 8s (4회 재시도)
+Spring Cloud Stream Consumer: 1s → 2s → 4s → 8s (4회 재시도)
          ↓ (여전히 실패)
-DLT: order-events-dlt → @DltHandler (로깅)
+DLQ: order-events.payment-service.dlq (바인더 레벨 DLQ)
          ↓
 운영팀 알림 → 수동 처리 또는 replay
 ```
 - Outbox로 이벤트 유실 방지
-- @RetryableTopic으로 자동 재시도
-- 최종 실패 시 DLT에 보관 (데이터 유실 없음)
+- Spring Cloud Stream의 바인더 레벨 재시도 (maxAttempts + backOff)
+- 최종 실패 시 DLQ에 보관 (데이터 유실 없음)
 - Prometheus로 CB 상태, 재시도 횟수 실시간 모니터링
 
 ---
@@ -161,15 +167,19 @@ Kafka가 5분간 응답 불가한 상황.
 ```
 Kafka 다운 중:
   주문 생성 → Order 저장 + OutboxEvent 저장 (정상)
-  OutboxRelay → Kafka 전송 실패 → published=false 유지
+  OutboxRelay → StreamBridge 전송 실패 → published=false 유지
   OutboxRelay → 1초 후 재시도 → 실패 → 반복...
 
 Kafka 복구 후:
   OutboxRelay → published=false인 이벤트 순서대로 전송
   → 자동으로 밀린 이벤트 처리
+
+★ 브로커 교체 시: application.yml의 binder만 변경
+  Kafka → GCP Pub/Sub: 코드 변경 0줄 (Spring Cloud Stream 추상화)
 ```
 - 주문 생성 자체는 정상 동작 (Outbox에 저장됨)
 - Kafka 복구 후 자동으로 밀린 이벤트 순서대로 전송
+- Spring Cloud Stream 덕분에 브로커를 GCP Pub/Sub 등으로 교체 가능 (코드 변경 없음)
 
 ---
 
@@ -205,9 +215,9 @@ Redis가 일시적으로 응답 불가한 상황.
 
 | 시나리오 | Monolithic | MSA Basic | MSA Traffic |
 |---------|:---------:|:---------:|:-----------:|
-| 주문 폭주 | 전체 다운 | 부분 스케일 | Gateway + Bulkhead + RateLimiter |
-| 결제 장애 | 전체 실패 | 주문 가능, 이벤트 불안 | Outbox + DLQ + Prometheus |
+| 주문 폭주 | 전체 다운 | 부분 스케일 | Gateway + Bulkhead + RateLimiter + **Redis Queue** |
+| 결제 장애 | 전체 실패 | 주문 가능, 이벤트 불안 | Outbox + **바인더 DLQ** + Prometheus |
 | 이중 결제 | DB 보호 | 취약 | 3중 보호 (API + Consumer + 비즈니스) |
 | 동시 매칭 | DB 락 | stale 위험 | Fencing Token + Bulkhead |
-| Kafka 장애 | 무관 | 이벤트 유실 | Outbox 누적 + 자동 복구 |
+| Kafka 장애 | 무관 | 이벤트 유실 | Outbox 누적 + 자동 복구 + **브로커 교체 가능** |
 | Redis 장애 | 무관 | 캐시 미스 | 다단계 Fallback |

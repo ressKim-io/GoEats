@@ -32,7 +32,7 @@ DB 커밋 성공 → Kafka 전송 실패 시 이벤트가 유실됩니다.
 
 ### 해결
 비즈니스 데이터와 이벤트를 **같은 DB 트랜잭션**에 저장합니다.
-별도의 `@Scheduled` 릴레이가 미발행 이벤트를 폴링하여 Kafka로 전송합니다.
+별도의 `@Scheduled` 릴레이가 미발행 이벤트를 폴링하여 **StreamBridge**로 전송합니다.
 
 ```java
 // msa-traffic/common/common-outbox/.../OutboxService.java
@@ -52,15 +52,19 @@ public void saveEvent(String aggregateType, String aggregateId,
 ```java
 // msa-traffic/common/common-outbox/.../OutboxRelay.java
 @Scheduled(fixedDelay = 1000)
+@SchedulerLock(name = "OutboxRelay", lockAtMostFor = "50s", lockAtLeastFor = "5s")
 @Transactional
 public void publishPendingEvents() {
     List<OutboxEvent> pendingEvents =
         outboxEventRepository.findByPublishedFalseOrderByCreatedAtAsc();
 
     for (OutboxEvent event : pendingEvents) {
-        String topic = resolveTopicName(event.getEventType());
-        kafkaTemplate.send(topic, event.getAggregateId(), event.getPayload());
-        event.markPublished();
+        String binding = resolveBindingName(event.getEventType());
+        Message<String> message = MessageBuilder.withPayload(event.getPayload())
+            .setHeader("kafka_messageKey", event.getAggregateId())
+            .build();
+        boolean sent = streamBridge.send(binding, message);
+        if (sent) event.markPublished();
     }
 }
 ```
@@ -73,46 +77,71 @@ public void publishPendingEvents() {
 
 ---
 
-## 2. @RetryableTopic + @DltHandler (Dead Letter Queue)
+## 2. Spring Cloud Stream Consumer + DLQ (Dead Letter Queue)
 
 ### 문제
 `@KafkaListener`에서 처리 실패 시 메시지가 유실됩니다.
+또한 Kafka에 직접 의존하면 브로커 교체 시 모든 코드를 수정해야 합니다.
 
 ### 해결
-Spring Kafka의 `@RetryableTopic`으로 자동 재시도하고, 최종 실패 시 DLT(Dead Letter Topic)로 이동합니다.
+Spring Cloud Stream의 **함수형 Consumer**로 메시지를 소비하고, **바인더 레벨 DLQ**로 실패 메시지를 처리합니다.
+`@Transactional` 로직은 별도 `@Service` Handler 클래스로 분리합니다 (Spring AOP 프록시 이슈 방지).
 
 ```java
 // msa-traffic/payment-service/.../event/OrderEventListener.java
-@RetryableTopic(
-    attempts = "4",
-    backoff = @Backoff(delay = 1000, multiplier = 2.0),
-    topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,
-    dltStrategy = DltStrategy.ALWAYS_RETRY_ON_ERROR
-)
-@KafkaListener(topics = "order-events", groupId = "payment-service")
-@Transactional
-public void handleOrderCreated(OrderCreatedEvent event) {
-    // 멱등성 체크 + 처리 로직
+@Configuration
+public class OrderEventListener {
+    @Bean
+    public Consumer<Message<String>> handleOrderCreated(OrderEventHandler handler) {
+        return message -> {
+            OrderCreatedEvent event = objectMapper.readValue(
+                message.getPayload(), OrderCreatedEvent.class);
+            handler.handle(event);  // @Transactional 처리는 Handler에 위임
+        };
+    }
 }
 
-@DltHandler
-public void handleDlt(OrderCreatedEvent event) {
-    log.error("Manual intervention required: orderId={}", event.orderId());
+// msa-traffic/payment-service/.../event/OrderEventHandler.java
+@Service
+public class OrderEventHandler {
+    @Transactional
+    public void handle(OrderCreatedEvent event) {
+        if (processedEventRepository.existsById(event.eventId())) return;
+        // 결제 처리 + ProcessedEvent 저장 + Outbox 이벤트 발행
+    }
 }
+```
+
+### 재시도 + DLQ 설정 (application.yml)
+```yaml
+spring.cloud.stream:
+  bindings:
+    handleOrderCreated-in-0:
+      destination: order-events
+      group: payment-service
+      consumer:
+        max-attempts: 4                    # 4회 재시도
+        back-off-initial-interval: 1000    # 1초 → 2초 → 4초 (exponential)
+        back-off-multiplier: 2.0
+  kafka.bindings:
+    handleOrderCreated-in-0:
+      consumer:
+        enableDlq: true                    # ★ 바인더 레벨 DLQ
+        dlqName: order-events.payment-service.dlq
 ```
 
 ### 재시도 흐름
 ```
 order-events → 1차 실패 (1초 후)
-  → order-events-retry-0 → 2차 실패 (2초 후)
-    → order-events-retry-1 → 3차 실패 (4초 후)
-      → order-events-retry-2 → 4차 실패
-        → order-events-dlt (Dead Letter Topic) → @DltHandler
+  → 2차 실패 (2초 후)
+    → 3차 실패 (4초 후)
+      → 4차 실패
+        → order-events.payment-service.dlq (DLQ 토픽)
 ```
 
 ### 주의점
-- **DLQ 모니터링 필수**: DLT에 쌓인 메시지를 수동으로 처리하는 운영 프로세스 필요
-- **재시도 토픽 생성**: retry-0, retry-1, retry-2, dlt 토픽이 자동 생성됨. Kafka 토픽 수 증가
+- **DLQ 모니터링 필수**: DLQ에 쌓인 메시지를 수동으로 처리하는 운영 프로세스 필요
+- **AOP 프록시**: 함수형 빈의 람다에서는 `@Transactional`이 동작하지 않음 → Handler 분리 필수
 - **재시도 간 상태 변경**: 재시도 사이에 외부 상태가 변경될 수 있음. 멱등성 보장 필수
 - **backoff 전략**: exponential backoff(1s, 2s, 4s)로 일시적 장애 복구 시간 확보
 
@@ -527,21 +556,20 @@ spring:
 
 ---
 
-## Kafka Producer 보장 수준
+## Kafka Producer 보장 수준 (Spring Cloud Stream)
 
 ```yaml
 # msa-traffic/order-service/src/main/resources/application.yml
-spring:
+spring.cloud.stream:
   kafka:
-    producer:
-      acks: all                      # 모든 replica 확인
-      retries: 3                     # 전송 실패 시 재시도
-      properties:
-        enable.idempotence: true     # 멱등한 프로듀서
-    consumer:
-      enable-auto-commit: false      # 수동 커밋
-    listener:
-      ack-mode: record               # 레코드 단위 커밋
+    binder:
+      brokers: ${KAFKA_BROKERS:localhost:9092}
+      producerProperties:
+        acks: all                      # 모든 replica 확인
+        retries: 3                     # 전송 실패 시 재시도
+        enable.idempotence: true       # 멱등한 프로듀서
+      consumerProperties:
+        enable.auto.commit: false      # 수동 커밋
 ```
 
 ---
@@ -553,8 +581,8 @@ spring:
 | Outbox 엔티티 | `msa-traffic/common/common-outbox/.../OutboxEvent.java` |
 | Outbox 저장 | `msa-traffic/common/common-outbox/.../OutboxService.java` |
 | Outbox 릴레이 | `msa-traffic/common/common-outbox/.../OutboxRelay.java` |
-| @RetryableTopic (Payment) | `msa-traffic/payment-service/.../event/OrderEventListener.java` |
-| @RetryableTopic (Order) | `msa-traffic/order-service/.../event/PaymentEventListener.java` |
+| 함수형 Consumer + Handler (Payment) | `msa-traffic/payment-service/.../event/OrderEventListener.java` + `OrderEventHandler.java` |
+| 함수형 Consumer + Handler (Order) | `msa-traffic/order-service/.../event/PaymentEventListener.java` + `PaymentEventHandler.java` |
 | ProcessedEvent | `msa-traffic/*/event/ProcessedEvent.java` |
 | Fencing Token | `msa-traffic/delivery-service/.../service/DeliveryService.java` |
 | Fencing Update | `msa-traffic/delivery-service/.../repository/DeliveryRepository.java` |
