@@ -20,6 +20,7 @@ GoEats/
 | 구분 | Monolithic | MSA Basic | MSA Traffic |
 |------|-----------|-----------|-------------|
 | Framework | Spring Boot 3.2.2 | + Spring Cloud | + Gateway |
+| DB | PostgreSQL 15 | + 서비스별 스키마 분리 | + 서비스별 스키마 분리 |
 | Cache | Caffeine (로컬) | Redis (분산) | + Cache Warming + Fallback |
 | Messaging | EventPublisher | Kafka | + Outbox + DLQ |
 | Resilience | try-catch | Circuit Breaker | + Retry + Bulkhead + RateLimiter |
@@ -45,11 +46,14 @@ GoEats/
 ## Quick Start
 
 ```bash
-# Monolithic 빌드
+# 1. 인프라 실행 (PostgreSQL, Kafka, Redis)
+docker-compose up -d
+
+# 2. Monolithic 빌드
 docker run --rm -v "$(pwd)/monolithic:/project" -w /project \
   gradle:8.12-jdk17 gradle build -x test -Djavax.net.ssl.protocols=TLSv1.2
 
-# MSA Traffic 빌드
+# 3. MSA Traffic 빌드
 docker run --rm -v "$(pwd)/msa-traffic:/project" -w /project \
   gradle:8.12-jdk17 gradle build -x test -Djavax.net.ssl.protocols=TLSv1.2
 ```

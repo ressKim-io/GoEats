@@ -5,9 +5,12 @@ spring:
   application:
     name: delivery-service
 
+  # ★ MSA-Traffic: Schema-separated PostgreSQL (delivery_schema)
   datasource:
-    url: jdbc:h2:mem:delivery_db
-    driver-class-name: org.h2.Driver
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/goeats?currentSchema=delivery_schema}
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME:goeats}
+    password: ${DB_PASSWORD:goeats1234}
     # ★ HikariCP tuning
     hikari:
       maximum-pool-size: 15
@@ -17,19 +20,28 @@ spring:
       max-lifetime: 1800000
 
   jpa:
+    open-in-view: false
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: false
+    properties:
+      hibernate:
+        default_schema: delivery_schema
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        default_batch_fetch_size: 100
 
   # ★ Redis for distributed lock + ShedLock
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
 
   # ★ Kafka configuration
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer

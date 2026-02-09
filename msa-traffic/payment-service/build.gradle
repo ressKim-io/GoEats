@@ -17,5 +17,12 @@ dependencies {
     // ★ Resilience4j
     implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
 
-    runtimeOnly 'com.h2database:h2'
+    // Redis for ShedLock distributed scheduler lock
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // ShedLock: prevents duplicate Outbox Relay execution across instances
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:5.10.0'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-redis-spring:5.10.0'
+
+    runtimeOnly 'org.postgresql:postgresql'
 }

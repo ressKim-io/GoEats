@@ -7,10 +7,13 @@
 | 구분 | Monolithic | MSA Basic | MSA Traffic |
 |------|:---------:|:---------:|:-----------:|
 | Java 17 | O | O | O |
-| H2 (In-Memory) | O | O | O |
+| PostgreSQL 15 | O | O | O |
 | Kafka | - | O | O |
 | Redis | - | O | O |
 | Zookeeper | - | O | O |
+
+> **DB 스키마 분리**: MSA에서는 서비스별 스키마(`order_schema`, `store_schema`, `payment_schema`, `delivery_schema`)를 사용합니다.
+> Monolithic은 기본 `public` 스키마를 사용합니다.
 
 ---
 
@@ -55,44 +58,22 @@ cd msa-traffic && ./gradlew build
 
 ---
 
-## 인프라 실행 (MSA 전용)
+## 인프라 실행
 
-MSA Basic과 MSA Traffic은 Kafka와 Redis가 필요합니다.
-
-### Docker Compose 예시
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-    ports:
-      - "2181:2181"
-
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    depends_on:
-      - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    ports:
-      - "9092:9092"
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-```
+모든 프로젝트는 PostgreSQL이 필요하며, MSA는 추가로 Kafka와 Redis가 필요합니다.
+프로젝트 루트의 `docker-compose.yml`로 모든 인프라를 한 번에 실행할 수 있습니다.
 
 ```bash
+# 프로젝트 루트에서 실행
 docker-compose up -d
 ```
+
+이 명령으로 아래 인프라가 실행됩니다:
+- **PostgreSQL 15** (:5432) - DB: `goeats`, 서비스별 스키마 자동 생성
+- **Kafka** (:9092) + **Zookeeper** (:2181)
+- **Redis 7** (:6379)
+
+> `infra/init.sql`이 PostgreSQL 시작 시 자동 실행되어 4개 스키마를 생성합니다.
 
 ---
 
@@ -101,6 +82,10 @@ docker-compose up -d
 ### Monolithic
 
 ```bash
+# 1. 인프라 시작 (PostgreSQL)
+docker-compose up -d
+
+# 2. 서비스 실행
 cd monolithic
 ./gradlew bootRun
 # http://localhost:8080
@@ -109,7 +94,7 @@ cd monolithic
 ### MSA Basic
 
 ```bash
-# 1. 인프라 시작
+# 1. 인프라 시작 (PostgreSQL + Kafka + Redis)
 docker-compose up -d
 
 # 2. 각 서비스 실행 (별도 터미널)
@@ -122,7 +107,7 @@ cd msa/delivery-service && ../gradlew bootRun  # :8084
 ### MSA Traffic
 
 ```bash
-# 1. 인프라 시작
+# 1. 인프라 시작 (PostgreSQL + Kafka + Redis)
 docker-compose up -d
 
 # 2. 각 서비스 실행 (별도 터미널)
@@ -146,6 +131,7 @@ cd msa-traffic/delivery-service  && ../gradlew bootRun  # :8084
 | Store | :8080 (공유) | :8082 | :8082 |
 | Payment | :8080 (공유) | :8083 | :8083 |
 | Delivery | :8080 (공유) | :8084 | :8084 |
+| PostgreSQL | :5432 | :5432 | :5432 |
 | Kafka | - | :9092 | :9092 |
 | Redis | - | :6379 | :6379 |
 | Zookeeper | - | :2181 | :2181 |
@@ -184,8 +170,10 @@ curl -s http://localhost:8081/actuator/prometheus | grep resilience4j_bulkhead
 
 ## 주의사항
 
-1. **H2 In-Memory DB**: 서비스 재시작 시 데이터가 초기화됩니다. 교육용 설정입니다.
-2. **Kafka 토픽 자동 생성**: `@RetryableTopic` 사용 시 retry-0, retry-1, retry-2, dlt 토픽이 자동 생성됩니다.
-3. **Redis 필수**: MSA Traffic의 Gateway Rate Limiting, Cache, ShedLock, Fencing Token이 모두 Redis에 의존합니다.
-4. **서비스 시작 순서**: MSA Traffic에서는 Gateway를 먼저 시작하고, 나머지 서비스를 순서대로 시작하는 것이 좋습니다.
-5. **Cache Warming**: store-service 시작 시 DB에서 데이터를 읽어 Redis에 프리로드합니다. DB에 초기 데이터가 없으면 빈 캐시로 시작합니다.
+1. **PostgreSQL 필수**: `docker-compose up -d`로 PostgreSQL을 실행한 후 서비스를 시작하세요. DDL은 `ddl-auto: update`로 자동 생성됩니다.
+2. **스키마 분리**: MSA에서는 서비스별 스키마가 분리되어 있습니다. `infra/init.sql`이 자동으로 스키마를 생성합니다.
+3. **Kafka 토픽 자동 생성**: `@RetryableTopic` 사용 시 retry-0, retry-1, retry-2, dlt 토픽이 자동 생성됩니다.
+4. **Redis 필수**: MSA Traffic의 Gateway Rate Limiting, Cache, ShedLock, Fencing Token이 모두 Redis에 의존합니다.
+5. **서비스 시작 순서**: MSA Traffic에서는 Gateway를 먼저 시작하고, 나머지 서비스를 순서대로 시작하는 것이 좋습니다.
+6. **Cache Warming**: store-service 시작 시 DB에서 데이터를 읽어 Redis에 프리로드합니다. DB에 초기 데이터가 없으면 빈 캐시로 시작합니다.
+7. **데이터 영속성**: PostgreSQL을 사용하므로 서비스 재시작 후에도 데이터가 유지됩니다. 초기화하려면 `docker-compose down -v`로 볼륨을 삭제하세요.

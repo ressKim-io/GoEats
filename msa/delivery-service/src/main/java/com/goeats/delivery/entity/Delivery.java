@@ -8,15 +8,21 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "deliveries")
+@Table(name = "deliveries", indexes = {
+        @Index(name = "idx_delivery_status", columnList = "status")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @EntityListeners(AuditingEntityListener.class)
 public class Delivery {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "delivery_seq")
+    @SequenceGenerator(name = "delivery_seq", sequenceName = "delivery_seq", allocationSize = 50)
     private Long id;
+
+    @Version
+    private Long version;
 
     // ★ MSA: Only stores orderId (separate database)
     @Column(nullable = false, unique = true)
@@ -55,4 +61,16 @@ public class Delivery {
     public void startDelivery() { this.status = DeliveryStatus.DELIVERING; }
     public void complete() { this.status = DeliveryStatus.DELIVERED; }
     public void cancel() { this.status = DeliveryStatus.CANCELLED; }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Delivery that)) return false;
+        return id != null && id.equals(that.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }
