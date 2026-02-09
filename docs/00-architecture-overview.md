@@ -11,7 +11,7 @@ GoEats 프로젝트는 동일한 배달 서비스 도메인을 **3가지 아키�
   단순하지만 한계             분산했지만 취약              프로덕션 수준
 
   단일 DB                  서비스별 DB                 서비스별 DB
-  단일 트랜잭션               Saga 패턴                 + Saga State 추적
+  단일 트랜잭션               Choreography Saga          Orchestration Saga
   직접 호출                  OpenFeign                 + 계단식 타임아웃
   try-catch                Circuit Breaker            + Retry + Bulkhead + RateLimiter
   Caffeine                 Redis Cache                + Cache Warming + 다단계 Fallback
@@ -54,7 +54,8 @@ GoEats 프로젝트는 동일한 배달 서비스 도메인을 **3가지 아키�
 - 분산 락 만료 후 stale write → **Fencing Token**으로 방지
 - 콜드 스타트 시 캐시 미스 → **Cache Warming**으로 프리로드
 - 주문 상태 변경 시 실시간 알림 불가 → **Redis Pub/Sub**로 즉시 브로드캐스트
-- Saga 진행 상태 추적 불가 → **SagaState** 엔티티로 상태 머신 관리
+- Choreography Saga의 분산된 흐름 제어 → **Orchestration Saga** (Command/Reply)로 중앙 제어
+- Saga 진행 상태 추적 불가 → **SagaState + SagaStep enum**으로 타입 안전 상태 머신 관리
 - 다중 인스턴스 스케줄러 중복 실행 → **ShedLock**으로 방지
 - 운영 가시성 부재 → **Prometheus + Actuator** 메트릭
 
@@ -74,6 +75,7 @@ GoEats 프로젝트는 동일한 배달 서비스 도메인을 **3가지 아키�
 | Framework | Spring Boot 3.2.2 | + Spring Cloud 2023.0.0 | + Spring Cloud Gateway |
 | Database | H2 (단일 DB) | H2 (서비스별 독립 DB) | + HikariCP 튜닝 |
 | Cache | Caffeine (로컬) | Redis (분산) | + Cache Warming + 다단계 Fallback |
+| Saga | @Transactional (단일) | Choreography (이벤트 기반) | **Orchestration** (Command/Reply) |
 | Messaging | ApplicationEventPublisher | Apache Kafka | + **Spring Cloud Stream** + Outbox + DLQ |
 | Queue | - | - | + **Redis Sorted Set** (주문 대기열) |
 | Realtime | - | - | + **Redis Pub/Sub** (상태 알림) |
@@ -124,7 +126,7 @@ Client ─── POST /api/orders ───> OrderController
                               └───────────────────────────────────────────┘
 ```
 
-### MSA Traffic: Saga + Outbox + Resilience
+### MSA Traffic: Orchestration Saga + Outbox + Resilience
 
 ```
 Client ── POST /api/orders ──> Gateway (:8080)
@@ -138,27 +140,40 @@ Client ── POST /api/orders ──> Gateway (:8080)
     │   │ @Transactional (원자적 처리)                    │
     │   │  1. StoreServiceClient (Feign + Retry + CB)  │
     │   │  2. Order 저장 (order_db)                     │
-    │   │  3. SagaState 생성                            │
-    │   │  4. OutboxEvent 저장 (같은 트랜잭션)            │
+    │   │  3. SagaState 생성 (PAYMENT_PENDING)          │
+    │   │  4. Orchestrator.startSaga()                 │
+    │   │     → PaymentCommand Outbox 저장              │
     │   └──────────────────────────────────────────────┘
                    │
     ┌──────────────┤ @Scheduled OutboxRelay (1초 간격)
     │              ▼
-    │   ┌─── Kafka: order-events ─────────────────────┐
-    │   ▼                                              │
-    │  payment-service (:8083)                         │
-    │  │ Spring Cloud Stream (4회 재시도)                  │
-    │  │ ProcessedEvent 중복 체크                         │
-    │  │ Outbox로 결과 이벤트 발행                         │
-    │  ├─ 성공 → Kafka: payment-events                  │
-    │  └─ 실패 → Kafka: payment-failed-events           │
-    │              │                │
-    │              ▼                ▼
-    │   ┌──────────────┐  ┌──────────────┐
-    │   │ order-service │  │ delivery-svc │
-    │   │ 상태 → PAID    │  │ Fencing Token │
-    │   │ Saga 완료      │  │ @Bulkhead    │
-    │   └──────────────┘  └──────────────┘
+    │   ┌─── Kafka: payment-commands ────────────────────┐
+    │   ▼                                                 │
+    │  payment-service (:8083)                            │
+    │  │ handlePaymentCommand (Spring Cloud Stream)       │
+    │  │ ProcessedEvent 멱등성 체크                          │
+    │  │ PROCESS → 결제 처리 / COMPENSATE → 환불            │
+    │  └─ SagaReply → Outbox → Kafka: saga-replies       │
+    │                                │
+    │              ┌─────────────────┘
+    │              ▼
+    │   ┌──────────────────────────────────────────┐
+    │   │ order-service: Orchestrator               │
+    │   │ handleSagaReply (Spring Cloud Stream)     │
+    │   │  ├─ PAYMENT 성공 → DeliveryCommand Outbox  │
+    │   │  ├─ PAYMENT 실패 → Saga FAILED             │
+    │   │  ├─ DELIVERY 성공 → Saga COMPLETED          │
+    │   │  └─ DELIVERY 실패 → CompensatePayment       │
+    │   └──────────────────────────────────────────┘
+    │                    │
+    │              ┌─────┘ (DeliveryCommand)
+    │              ▼
+    │   ┌─── Kafka: delivery-commands ──────────────┐
+    │   ▼                                            │
+    │  delivery-service (:8084)                      │
+    │  │ handleDeliveryCommand                       │
+    │  │ Fencing Token + @Bulkhead                   │
+    │  └─ SagaReply → Outbox → Kafka: saga-replies   │
     │
     └── 실패 시: DLQ (바인더 레벨) → Dead Letter Topic → 수동 처리
 ```
