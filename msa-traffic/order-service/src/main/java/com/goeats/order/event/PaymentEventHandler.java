@@ -29,6 +29,7 @@ public class PaymentEventHandler {
     private final OrderRepository orderRepository;
     private final SagaStateRepository sagaStateRepository;
     private final ProcessedEventRepository processedEventRepository;
+    private final OrderStatusPublisher orderStatusPublisher; // ★ Redis Pub/Sub: 실시간 상태 알림
 
     /**
      * 결제 완료 이벤트 처리 - 주문 상태를 PAID로 변경하고 Saga 진행.
@@ -49,6 +50,8 @@ public class PaymentEventHandler {
         // 주문 상태를 PAID로 업데이트
         orderRepository.findById(event.orderId()).ifPresent(order -> {
             order.updateStatus(OrderStatus.PAID);
+            // ★ Redis Pub/Sub: 결제 완료 실시간 알림
+            orderStatusPublisher.publish(order.getId(), OrderStatus.PAID.name());
             log.info("Order {} updated to PAID", order.getId());
         });
 
@@ -85,6 +88,8 @@ public class PaymentEventHandler {
         // ★ Saga compensation: cancel order on payment failure
         orderRepository.findById(event.orderId()).ifPresent(order -> {
             order.updateStatus(OrderStatus.CANCELLED);
+            // ★ Redis Pub/Sub: 결제 실패로 인한 취소 실시간 알림
+            orderStatusPublisher.publish(order.getId(), OrderStatus.CANCELLED.name());
             log.warn("Order {} CANCELLED due to payment failure: {}",
                     order.getId(), event.reason());
         });
